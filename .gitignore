@@ -1,0 +1,36 @@
+# CMake
+build/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake.in
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.vcxproj.filters
+x64/
+Debug/
+Release/
+
+# vcpkg
+vcpkg_installed/
+
+# Binary outputs
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# IDE
+.idea/
+.vscode/settings.json
+
+# OS
+Thumbs.db
+.DS_Store
