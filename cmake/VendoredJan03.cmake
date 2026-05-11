@@ -33,16 +33,15 @@ endif()
 function(_jan03_apply_legacy_flags target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
-            /W0           # legacy code, no warnings expected to be actionable by us
-            /Zm300        # PCH memory ceiling, matches original /Zm300
-            /wd4828       # invalid character in source (CP-1251 / cyrillic comments)
-            /EHsc         # exception model — original used /EHsc
-            /MP           # parallel per-target compilation
+            /W0                    # legacy code, no actionable warnings
+            /Zm300                 # PCH memory ceiling, matches original /Zm300
+            /wd4828                # invalid CP-1251 chars in source comments
+            /EHsc                  # exception model
+            /MP                    # parallel per-target compilation
+            /permissive            # legacy non-conformant code
+            /Zc:noexceptTypes-     # noexcept NOT part of function type (pre-C++17)
+            /Zc:ternary-           # legacy ternary operator behavior
         )
-        # The original code is pre-C++17 and assumes implicit
-        # `for(int i=0; ...; ++i) { ... } for(int i=0; ...; ...)` (no scope warning).
-        # Force MSVC into permissive mode for legacy.
-        target_compile_options(${target} PRIVATE /permissive)
     endif()
     target_compile_definitions(${target} PRIVATE
         WIN32
@@ -52,6 +51,15 @@ function(_jan03_apply_legacy_flags target)
         _CRT_NONSTDC_NO_WARNINGS
         _SCL_SECURE_NO_WARNINGS
         _WINSOCK_DEPRECATED_NO_WARNINGS
+        _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS  # legacy uses <hash_map>
+        _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS    # legacy uses removed-in-C++17 stuff
+        _SILENCE_ALL_CXX20_DEPRECATION_WARNINGS
+        # Force MSVC <math.h>/<cmath> to NOT introduce noexcept-qualified
+        # float overloads at global scope. Without this, Nival's tools.h
+        # `inline float fabs(float) {...}` collides with std's
+        # `float fabs(float) noexcept` and gets C2382 (different exception spec).
+        _HAS_CXX17=0
+        _HAS_CXX20=0
         NOMINMAX
         WIN32_LEAN_AND_MEAN
         $<$<CONFIG:Debug>:_DEBUG>
@@ -99,6 +107,12 @@ function(add_jan03_subproject NAME)
     set_target_properties(${TARGET_NAME} PROPERTIES
         FOLDER "Jan03"
         OUTPUT_NAME ${NAME}
+        # Legacy code predates C++17, where `noexcept` became part of the
+        # function type. Nival's tools.h redeclares fabs/cos/sin/etc as
+        # non-noexcept overloads, which under C++17+ conflicts with std's
+        # noexcept-qualified versions. Pin legacy targets to C++14.
+        CXX_STANDARD 14
+        CXX_EXTENSIONS OFF
     )
     target_include_directories(${TARGET_NAME} PUBLIC ${SP_DIR})
 

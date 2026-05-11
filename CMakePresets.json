@@ -4,13 +4,17 @@
     "configurePresets": [
         {
             "name": "msvc-debug",
-            "displayName": "MSVC x64 Debug (Ninja)",
+            "displayName": "MSVC x86 Debug (Ninja)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/msvc-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_C_COMPILER": "cl",
                 "CMAKE_CXX_COMPILER": "cl"
+            },
+            "architecture": {
+                "value": "x86",
+                "strategy": "external"
             },
             "environment": {
                 "VSCMD_SKIP_SENDTELEMETRY": "1"
@@ -19,7 +23,7 @@
         {
             "name": "msvc-release",
             "inherits": "msvc-debug",
-            "displayName": "MSVC x64 Release (Ninja)",
+            "displayName": "MSVC x86 Release (Ninja)",
             "binaryDir": "${sourceDir}/build/msvc-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"

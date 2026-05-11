@@ -1,0 +1,28 @@
+#pragma once
+// Shim <hash_map> -> <unordered_map>.
+//
+// Jan03's Misc/StdAfx.h pulls #include <hash_map>. Modern MSVC's
+// stdext::hash_map demands hash functors with a `bucket_size` static
+// member (hash_compare interface) — Nival's SDefaultPtrHash doesn't
+// provide it. std::unordered_map only needs `size_t operator()` which
+// SDefaultPtrHash already has.
+//
+// Expose unordered_map under the legacy spellings the Jan03 source uses.
+
+#include <unordered_map>
+#include <unordered_set>
+
+namespace std {
+template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>,
+         class A = std::allocator<std::pair<const K, V>>>
+using hash_map = std::unordered_map<K, V, H, E, A>;
+
+template<class K, class V, class H = std::hash<K>, class E = std::equal_to<K>,
+         class A = std::allocator<std::pair<const K, V>>>
+using hash_multimap = std::unordered_multimap<K, V, H, E, A>;
+}
+
+namespace stdext {
+using std::hash_map;
+using std::hash_multimap;
+}
