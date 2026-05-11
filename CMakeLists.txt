@@ -32,8 +32,32 @@ target_link_libraries(jan03_libpng PUBLIC jan03::zlib)
 # libpng, plain `extern` is correct.
 target_compile_definitions(jan03_libpng PRIVATE externA5=extern)
 
-# First C++ subproject test (PCH + stlport shim verification).
+# Engine subprojects — order matters for #include "../Misc/..." chains
+# but the helper exposes each subproject's dir as PUBLIC include, so as
+# long as targets are declared before being linked, order is flexible.
 add_jan03_subproject(Misc)
+add_jan03_subproject(MemoryMngr)
+add_jan03_subproject(MemoryMngrDll)
+add_jan03_subproject(MiscDll)
+add_jan03_subproject(FileIO)
+add_jan03_subproject(DBFormat)
+add_jan03_subproject(Image)
+add_jan03_subproject(Input)
+add_jan03_subproject(FModSound)
+add_jan03_subproject(OpenDynamix)
+add_jan03_subproject(Script)
+
+# Cross-subproject deps (best-guess from #include chains; refine as
+# linker errors appear).
+target_link_libraries(jan03_MemoryMngrDll PUBLIC jan03::MemoryMngr)
+target_link_libraries(jan03_MiscDll PUBLIC jan03::Misc)
+target_link_libraries(jan03_FileIO PUBLIC jan03::Misc jan03::MemoryMngr)
+target_link_libraries(jan03_DBFormat PUBLIC jan03::Misc jan03::FileIO)
+target_link_libraries(jan03_Image PUBLIC jan03::Misc jan03::zlib jan03::libpng)
+target_link_libraries(jan03_FModSound PUBLIC jan03::Misc silent_storm_fmod_stub)
+target_link_libraries(jan03_Input PUBLIC jan03::Misc)
+target_link_libraries(jan03_Script PUBLIC jan03::Misc jan03::MemoryMngr)
+target_link_libraries(jan03_OpenDynamix PUBLIC jan03::Misc)
 
 add_executable(silent_storm WIN32 src/main_stub.cpp)
 target_apply_compiler_warnings(silent_storm)
@@ -42,4 +66,14 @@ target_link_libraries(silent_storm PRIVATE
     jan03::zlib
     jan03::libpng
     jan03::Misc
+    jan03::MemoryMngr
+    jan03::MemoryMngrDll
+    jan03::MiscDll
+    jan03::FileIO
+    jan03::DBFormat
+    jan03::Image
+    jan03::Input
+    jan03::FModSound
+    jan03::OpenDynamix
+    jan03::Script
 )

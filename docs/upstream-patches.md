@@ -10,6 +10,29 @@ get modern toolchains to accept the legacy code. Big rewrites belong in
 
 ---
 
+## 2026-05-11 — `MemoryMngr/DumbPow2Alloc.h` defer to std `<new>`
+
+**File:** `upstream/Soft/Andy/Jan03/a5dll/MemoryMngr/DumbPow2Alloc.h`
+
+**Change:** Replaced the entire body. Original was a "fake `<new>`":
+- Guarded with `_NEW_`/`_INC_NEW` to suppress the real `<new>` include
+- Redefined `std::bad_alloc`, `std::nothrow_t`, `std::new_handler`
+- Declared `operator new` / `operator new[]` / placement new
+
+New version: `#pragma once`, `#include <new>`, `#include "malloc.h"`. The
+operator new/delete *replacement* mechanism (defined in `DumbPow2Alloc.cpp`)
+still works under modern C++ — replaceable allocation functions are an ABI
+feature, no header trickery needed.
+
+**Reason:** Modern MSVC `vcruntime_new.h` uses different include guards
+than the legacy `<new>` header, so the `_NEW_` guard trick didn't prevent
+vcruntime from defining `std::nothrow_t`/`std::bad_alloc`/`operator new`.
+Both definitions ended up active, producing C2011 (nothrow_t struct
+redefined), C2084 (operator new has a body), C3615 (constexpr operator
+new can't), C2504 (std::bad_alloc base undefined).
+
+---
+
 ## 2026-05-11 — `Misc/tools.h` math `noexcept`
 
 **Files:** `upstream/Soft/Andy/Jan03/a5dll/Misc/tools.h` lines 627, 695-698
