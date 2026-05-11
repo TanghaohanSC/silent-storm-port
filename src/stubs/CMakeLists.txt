@@ -13,6 +13,9 @@
 add_library(silent_storm_fmod_stub STATIC fmod_stub.cpp)
 target_include_directories(silent_storm_fmod_stub PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    # Provides <fmod.h> shim that forwards to fmod_stub.h (Nival code
+    # does #include <fmod.h>; the real fmod.h is proprietary).
+    ${CMAKE_CURRENT_SOURCE_DIR}/fmod_shim_headers
 )
 target_apply_compiler_warnings(silent_storm_fmod_stub)
 

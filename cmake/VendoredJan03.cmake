@@ -41,6 +41,9 @@ function(_jan03_apply_legacy_flags target)
             /permissive            # legacy non-conformant code
             /Zc:noexceptTypes-     # noexcept NOT part of function type (pre-C++17)
             /Zc:ternary-           # legacy ternary operator behavior
+            # Force-include compat shim only for C++ TUs (legacy_compat.h
+            # itself uses <windows.h>/<cstdio>; C files don't need it).
+            $<$<COMPILE_LANGUAGE:CXX>:/FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h>
         )
     endif()
     target_compile_definitions(${target} PRIVATE
