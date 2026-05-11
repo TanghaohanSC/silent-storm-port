@@ -1,0 +1,54 @@
+name: windows-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout port repo
+        uses: actions/checkout@v4
+        with:
+          path: port
+
+      - name: Checkout upstream Silent-Storm
+        uses: actions/checkout@v4
+        with:
+          repository: TanghaohanSC/Silent-Storm
+          path: upstream
+          # upstream/ uses Git LFS for game data (Complete/), but Phase 0
+          # build needs only Soft/ source — skip LFS pulls to save bandwidth.
+          lfs: false
+
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure (CMake)
+        working-directory: port
+        run: cmake --preset msvc-debug
+
+      - name: Build
+        working-directory: port
+        run: cmake --build --preset msvc-debug
+
+      - name: Verify exe artifact
+        working-directory: port
+        shell: pwsh
+        run: |
+          $exe = "build\msvc-debug\bin\silent_storm.exe"
+          if (-not (Test-Path $exe)) {
+              Write-Error "expected exe missing: $exe"
+              exit 1
+          }
+          Write-Host "OK: built $exe ($((Get-Item $exe).Length) bytes)"
+
+      # Boot smoke test deliberately NOT run in CI: the runner has no
+      # access to upstream/Complete/ (game assets are LFS-gated), so exe
+      # would fail at first resource load. Smoke test stays local-only.
