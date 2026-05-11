@@ -12,26 +12,30 @@ if(NOT DEFINED UPSTREAM_ROOT)
     set(UPSTREAM_ROOT "${CMAKE_SOURCE_DIR}/../upstream")
 endif()
 
-# --- stlport (vc7 build vendored in upstream/Soft/SDK/stlport) ---
-set(STLPORT_INCLUDE_DIR "${UPSTREAM_ROOT}/Soft/SDK/stlport/stlport")
+# --- stlport shim ---
+# Original Jan03 code includes <stl/_config.h> via every StdAfx.h. Real stlport
+# vc7 is at upstream/Soft/SDK/stlport but uses VS .NET 2003 relative include
+# paths (e.g. stlport/stddef.h does "../include/stddef.h") that don't resolve
+# under modern MSVC. Even pure C files break because stlport's stddef.h hijacks
+# the include path before MSVC's stddef.h.
+#
+# Solution: provide a TINY shim (port/third_party/stlport_shim/stl/_config.h)
+# that satisfies the include directive but leaves all std:: types coming from
+# modern MSVC. The original Jan03 source expects stlport-as-drop-in-std, which
+# modern MSVC's std:: implementation already satisfies.
+#
+# If specific stlport-only headers are referenced (slist, rope, hash_map),
+# add forward-shims here on demand.
 
-if(NOT EXISTS "${STLPORT_INCLUDE_DIR}/stl/_config.h")
-    message(FATAL_ERROR
-        "stlport headers not found at ${STLPORT_INCLUDE_DIR}.\n"
-        "Expected upstream/Soft/SDK/stlport/stlport/stl/_config.h "
-        "(verify upstream/ is cloned and stlport is checked out).")
+set(STLPORT_SHIM_DIR "${CMAKE_SOURCE_DIR}/third_party/stlport_shim")
+if(NOT EXISTS "${STLPORT_SHIM_DIR}/stl/_config.h")
+    message(FATAL_ERROR "stlport shim missing at ${STLPORT_SHIM_DIR}/stl/_config.h")
 endif()
 
 add_library(legacy_stlport INTERFACE)
 target_include_directories(legacy_stlport SYSTEM INTERFACE
-    ${STLPORT_INCLUDE_DIR}
-)
-# stlport headers conflict with system <new>, <iostream> etc. if both visible.
-# Inject a project-wide preprocessor symbol that stlport headers test for.
-target_compile_definitions(legacy_stlport INTERFACE
-    _STLP_USE_STATIC_LIB
-    _STLP_USE_NEWALLOC
+    ${STLPORT_SHIM_DIR}
 )
 add_library(legacy::stlport ALIAS legacy_stlport)
 
-message(STATUS "Legacy: stlport vc7 vendored from ${STLPORT_INCLUDE_DIR}")
+message(STATUS "Legacy: stlport shim active at ${STLPORT_SHIM_DIR} (modern std:: backs it)")
