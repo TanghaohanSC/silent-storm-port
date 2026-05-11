@@ -51,3 +51,20 @@ Commenting out is safe: every call site `fabs(myFloat)` resolves to
 std's identical implementation. `cos(float)` callers similarly fall back
 to std's float overload (which already specializes for float, no
 double promotion). Behavior is byte-identical.
+
+---
+
+## 2026-05-12 — Main + Game subprojects
+
+See `docs/patches/main-game.md` for the full per-file patch list. Summary:
+
+- ~40 upstream files patched (Misc/, Main/, Game/, MemoryMngr/, ADOImport/, DBFormat/).
+- 196 `if (CDynamicCast<T> v(arg))` sites refactored via script.
+- 104 `else if (CDynamicCast<T> v(arg))` sites refactored via script.
+- 30+ `.insert(.end())` → `.emplace(.end())` (modern STL).
+- `Misc/Basic2.h` gains non-template global `operator==`/`!=` for CPtr/CObj/CMObj — fixes 50+ C2666 ambiguities.
+- `Misc/EventsBase.h` caches typeid pointer at ctor to allow forward-decl TParam in dtor.
+- `Main/StdAfx.h` pulls all NDb data headers into PCH (MSVC eagerly instantiates CDBPtr<T>::operator&).
+- `MemoryMngr/DumbPow2Alloc.cpp` switches from MemoryMngrDll's FastDumbAlloc to stdlib malloc/free.
+- `Main/Interface.cpp` excises dead `CMouseCaptureHandler` referencing nonexistent IWindow/IInterface.
+- `port/third_party/stlport_shim/legacy_compat.h` includes `<../ucrt/time.h>` to bypass Main/Time.h shadow.

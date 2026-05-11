@@ -3,6 +3,15 @@
 //   - MFC debug TRACE macros (Jan03 uses TRACE1..TRACE3 without including <afx.h>)
 //   - other pre-modern artifacts surfaced during Phase 0 build
 
+// silent-storm-port: Jan03's Main/ has its own `Time.h` which case-insensitively
+// shadows the system `<time.h>`. <ctime>'s `using ::clock_t;` chain fails
+// because Main/Time.h doesn't declare clock_t. Pull the C time header via
+// its full relative path under the UCRT SDK to bypass the shadow.
+extern "C" {
+#  include <../ucrt/time.h>
+}
+
+
 // Some legacy translation units use `max`/`min` without including <algorithm>
 // (assume MFC's windef.h provides them as macros — NOMINMAX disables those).
 // Provide std::max/min in global scope unconditionally for legacy code.

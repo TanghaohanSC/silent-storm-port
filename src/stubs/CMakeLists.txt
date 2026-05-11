@@ -19,6 +19,24 @@ target_include_directories(silent_storm_fmod_stub PUBLIC
 )
 target_apply_compiler_warnings(silent_storm_fmod_stub)
 
+# --- ADOImport runtime stub: NDatabase symbols without ADO COM ---
+# Upstream ADOImport links against msado15.dll (Microsoft Access ADO). Only
+# the Import()/Refresh() paths use it, and those are dev-time only. This stub
+# provides the runtime NDatabase symbols so the Main DLL links and game.db
+# loads via Serialize().
+add_library(silent_storm_ado_stub STATIC ado_stub.cpp)
+target_link_libraries(silent_storm_ado_stub PUBLIC legacy::stlport jan03::Misc jan03::FileIO jan03::DBFormat)
+set_target_properties(silent_storm_ado_stub PROPERTIES
+    CXX_STANDARD 14
+    CXX_EXTENSIONS OFF
+)
+target_compile_definitions(silent_storm_ado_stub PRIVATE
+    _CRT_SECURE_NO_WARNINGS _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
+    _HAS_CXX17=0
+)
+target_compile_options(silent_storm_ado_stub PRIVATE /W0 /permissive /Zc:noexceptTypes-
+    /FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h)
+
 # --- LifeStudioHeadAPI permanent header-only stub ---
 add_library(silent_storm_lshead_stub INTERFACE)
 target_include_directories(silent_storm_lshead_stub SYSTEM INTERFACE

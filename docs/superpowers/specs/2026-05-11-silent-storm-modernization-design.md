@@ -28,7 +28,7 @@
 | 渲染：原生 Vulkan vs 抽象层 | 走 bgfx 抽象层（Vulkan/D3D11/Metal/GL 多后端） |
 | UI scale up 方案 | (a) 整数倍放大原 bitmap，HUD 重定位；UI 重写推 v2 |
 | 运行时 DB（**2026-05-11 修正后再修正**）| inventory 表明 Jan03 **运行时不用 SQL**，game.db 是自定义二进制格式（`DBFormat` 子项目 15 cpp 写的序列化）。SQL/MySQL/ADO 只出现在内容流水线工具（DataImport/ADOImport，按 §2 全部丢弃）。**Phase 3.5 SQLite 迁移整个删除**；运行时 DB = 直接读 game.db |
-| Lua（**2026-05-11 修正**）| inventory 表明 Jan03 内置**改造版 Lua 4**（含 `lua_startThread`/`lua_executeThreads` 协作线程扩展，215 调用点 18 文件），**没有 .lua 脚本文件**（脚本编进 game.db 字节码）。Phase 4 策略 = 把改造版 Lua 4 当 vendored 子项目保留 → 让游戏先跑通；移到 Lua 5.4 留 v2 |
+| Lua（**2026-05-11 修正**）| inventory 表明 Jan03 内置**改造版 Lua 4**（含 `lua_startThread`/`lua_executeThreads` 协作线程扩展，215 调用点 18 文件），**没有 .lua 脚本文件**（脚本编进 game.db 字节码）。Phase 4 策略 = 把改造版 Lua 4 当 vendored 子项目保留 → 让游戏先跑通；移到 Lua 5.5 留 v2 |
 | 源码基线（**2026-05-11 修正**）| `Soft/Andy/` 下只有 **Jan03** 是完整 VS .NET 2003 solution（`a5dll/A5.sln`，~30 子项目，639 .cpp + 776 .h）。EnglishGold/RussianGold/RussianPatch1 只有 Game.exe 二进制无源码；Oct02 是旧 snapshot（不到一半代码）；其余子目录基本空。**baseline = `Soft/Andy/Jan03/a5dll/`**，主入口 `Game/Main.cpp` |
 
 ---
@@ -84,10 +84,10 @@ inventory 表明 Jan03 内置一个**改造版 Lua 4**（`Script/` 子项目：l
 
 v1 策略：**保留 vendored 改造版 Lua 4 不动**，让游戏先跑通。理由：
 - 没 .lua 源文件可以批量迁移
-- 215 调用点 + 协作线程扩展，移到 Lua 5.4 等于重写半个 VM
+- 215 调用点 + 协作线程扩展，移到 Lua 5.5 等于重写半个 VM
 - 现代化收益小（没社区会写新 Lua 4 mod）
 
-迁移到 Lua 5.4 推 **v2**。
+迁移到 Lua 5.5 推 **v2**。
 
 ### 3.7 序列化与存档
 - 原 `Soft/Serialize7` 弃用
