@@ -46,14 +46,19 @@
 - 把原代码里所有 `WinMain` / `CreateWindow` / `WndProc` / `DirectInput` 调用全部迁到 SDL3
 - v1 阶段只在 Windows 编译，但代码不写 `#ifdef _WIN32` 的硬编码 path
 
-### 3.3 渲染层
+### 3.3 渲染层（**2026-05-11 修正：实际是 D3D9，不是 D3D8**）
+Game.vcproj 链 `d3d9.lib`+`dxguid.lib`（不是 d3d8.lib）。spec 之前误判。两者在现代 WinSDK 都还在，Phase 0 link 无影响，但 Phase 1 翻译层目标改成 **D3D9→bgfx**：
+- D3D9 已是基本 shader-based API（有 PS/VS 1.x-3.0），比 D3D8 fixed-function 翻译容易
+- 还需要处理 D3D9 的 fixed function 残留（SetTextureStageState 等仍可用）
+
 - **bgfx + bimg + bx**（同一个组织的三件套）
 - 后端：v1 用 D3D11 + Vulkan 双后端（用户可切），v2 加 Metal + OpenGL
 - shader 工具：bgfx 自带 `shaderc`，从 GLSL 编到所有目标
-- **核心工作 = DX8 fixed-function 翻译层**：
-  - 把原代码的 `SetTextureStageState`、`SetRenderState`、`SetTransform` 等 fixed function 调用映射成 bgfx 的 uniform + shader program
+- **核心工作 = D3D9→bgfx 翻译层**：
+  - 把原代码的 `SetTextureStageState`、`SetRenderState`、`SetTransform`、Set{Vertex,Pixel}Shader 调用映射成 bgfx uniform + program
+  - 原代码现成的 .hlsl shader 用 `shaderc` 转 bgfx 二进制 shader（D3D9 HLSL → SPIR-V → 平台原生）
   - 设计 5-8 个通用 shader：`diffuse_unlit`、`diffuse_lit`、`diffuse_lit_skinned`、`ui_textured`、`particle`、`shadow_caster`、`terrain`、`water`
-  - 原 `IDirect3DDevice8` 方法签名保持兼容，内部转发到翻译层
+  - 原 `IDirect3DDevice9` 方法签名保持兼容，内部转发到翻译层
 - 任意分辨率支持：render target 用系统分辨率，FOV/aspect math 修复 4:3 假设
 - 鼠标→世界坐标反投影矩阵按当前分辨率计算
 
