@@ -16,5 +16,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 
+add_subdirectory(src/stubs)
+
 add_executable(silent_storm WIN32 src/main_stub.cpp)
 target_apply_compiler_warnings(silent_storm)
+target_link_libraries(silent_storm PRIVATE silent_storm_stubs)
