@@ -39,6 +39,7 @@ add_subdirectory(src/config)
 add_subdirectory(src/platform)
 add_subdirectory(src/renderer)
 add_subdirectory(src/shaders)    # Phase 1 T8: bgfx shader archetypes
+add_subdirectory(src/save)       # Phase 7: flatbuffers save game system
 # Make sure compiled .bin shaders exist before the renderer-using exe links.
 add_dependencies(ss_renderer ss_shaders)
 
