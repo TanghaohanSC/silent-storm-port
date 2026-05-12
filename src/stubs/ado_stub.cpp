@@ -321,26 +321,14 @@ static void PromoteRecordsFromStorage()
         }
     }
     if (dump) fclose(dump);
-    // r25 Phase 2: SEH-guarded Import + fill for each record
-    for (NDatabase::CTablesHash::iterator it = tables.begin(); it != tables.end(); ++it) {
-        int nTableID = it->first;
-        CDBTableBase& table = it->second;
-        CDBTableDataStorage* s = table.GetStorage();
-        if (!s) continue;
-        int nRows = (int)s->m_buckets.size();
-        for (int row = 0; row < nRows; ++row) {
-            if (s->m_buckets[row].empty()) continue;
-            int recordID = s->m_buckets[row][0];
-            CDBRecord* rec = table.GetDBRecord(recordID);
-            if (!rec) continue;
-            FillRecordFromRow(rec, s, row);
-            ++nFieldsFilled;
-        }
-    }
+    // r26: Phase 2 disabled — Import side effects (pTemplate->variants.push_back
+    // etc.) mutate global state in ways that break bgfx 2D view init.
+    // Sticking with r24's basic ID promote until static schema gen replaces Import.
+    (void)nFieldsFilled;
     FILE* fp = NULL; fopen_s(&fp, "silent_storm_r25_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r25: promoted %d records, filled %d via SEH-guarded Import (%d/%d tables)\n",
-                nPromoted, nFieldsFilled, nMatched, nTotalTables);
+        fprintf(fp, "r26: promoted %d records (IDs only, no field fill) %d/%d tables\n",
+                nPromoted, nMatched, nTotalTables);
         fclose(fp);
     }
 }
