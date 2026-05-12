@@ -76,3 +76,15 @@ See `docs/patches/main-game.md` for the full per-file patch list. Summary:
 - `Main/iRenderWorld.cpp` null-guards in CRenderBaseInterface::OnGetFocus / ProcessEvent / Step. When MainMenuInterface skips parent::Initialize (DB cameras/world missing), pRender / pRenderSound / pCursor / pInterface / pCamera / pScene stay null. Each was being unconditionally dereferenced, triggering a `dynamic_cast` SEGV deep inside CastToUserObjectImpl (the EAX=0 vtable read seen in r30).
 - `Main/iMain.cpp` finer trace points (StepApp.5 input handled / .6 LoadPrecached ok / .7 Step ok).
 - Result: game reaches main-loop steady state — `22.N.c StepApp ret=1` for arbitrary N, no crash, fallback main menu painted via `ss_r8_render_fallback_menu`. This is the OpenMW-style "main menu boots and stays up" milestone.
+
+---
+
+## 2026-05-12 — r34 data-driven MainMenu loads UIContainer 347
+
+After r32+r33 the DB is fully populated, so menu data records resolve.
+
+- `Main/iRenderWorld.h/.cpp` — new `CRenderBaseInterface::InitializeUIOnly()` helper that creates only pCursor + pInterface (no world / scene / camera).
+- `Main/iMainMenu.cpp` — `CMainMenuInterface::Initialize` calls `InitializeUIOnly()`, then loads CMainMenuUI (`GetUIContainer(347)` resolves), runs LoadTemplate / ShowWindow. Traces "MMI::Init.2 UIContainer 347 FOUND".
+- `CMainMenuInterface::Step` — guards on `!GetCamera()` and falls through to `ss_r8_render_fallback_menu` so the user has visible feedback (we don't yet wire 2D UI through bgfx, so the UIContainer pixels go nowhere).
+
+Result: data-driven main-menu state actually reached + steady-state main loop. The "loaded but invisible CMainMenuUI" is the bridge to the next milestone (paint the UI tree through bgfx 2D).
