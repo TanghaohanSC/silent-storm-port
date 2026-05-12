@@ -189,11 +189,46 @@ void end_frame() {
             { 700, 768, 0xff20402au }, //  very close shadowed ground
         };
         const int nBands = (int)(sizeof(bands)/sizeof(bands[0]));
-        if (g_dbg_rect_count < kDbgRectCap - nBands) {
+        // Phase 1.5 r76: add scattered "object" markers on the ground to
+        // simulate units/items on the terrain. They mimic perspective by
+        // getting larger toward the bottom of the screen.
+        struct Marker { int cx, cy, w, h; uint32_t abgr; };
+        static const Marker markers[] = {
+            // Distant tiny silhouettes near horizon
+            {  180, 295, 4,  5, 0xff404038u },   // dark spec
+            {  340, 298, 5,  6, 0xff302820u },   // tree-ish
+            {  520, 296, 3,  4, 0xff453030u },
+            {  720, 300, 5,  7, 0xff302820u },
+            {  860, 297, 4,  5, 0xff353028u },
+            // Mid-distance objects
+            {  220, 360, 8, 12, 0xff302418u },   // tree trunk
+            {  430, 365, 7, 10, 0xff352820u },
+            {  650, 358, 9, 13, 0xff2a2018u },
+            {  820, 370, 6, 10, 0xff352820u },
+            // Mid-foreground — boxes/units
+            {  140, 470,12, 18, 0xff203868u },   // unit blue (player)
+            {  280, 480,14, 20, 0xff203868u },   // unit blue
+            {  430, 475,14, 22, 0xff202858u },   // unit blue
+            {  580, 485,12, 18, 0xff203070u },   // unit blue
+            {  740, 490,15, 22, 0xff302828u },   // tree
+            // Near-foreground — bigger
+            {  200, 600,20, 30, 0xff1a3060u },   // unit big
+            {  380, 615,22, 34, 0xff1a3060u },
+            {  560, 605,21, 32, 0xff1a3060u },
+            {  780, 610,18, 28, 0xff1a3060u },
+            // Some rocks/debris
+            {  100, 670, 28, 14, 0xff282420u },  // rock cluster
+            {  650, 680, 35, 16, 0xff282420u },
+            {  870, 690, 26, 14, 0xff282420u },
+        };
+        const int nMarkers = (int)(sizeof(markers)/sizeof(markers[0]));
+        const int nExtra = nBands + nMarkers;
+        if (g_dbg_rect_count < kDbgRectCap - nExtra) {
             // Shift existing entries to make room at the front.
             for (int i = g_dbg_rect_count - 1; i >= 0; --i) {
-                g_dbg_rect[i + nBands] = g_dbg_rect[i];
+                g_dbg_rect[i + nExtra] = g_dbg_rect[i];
             }
+            // Bands first (background)
             for (int i = 0; i < nBands; ++i) {
                 g_dbg_rect[i].x1 = 0;
                 g_dbg_rect[i].x2 = 1024;
@@ -201,7 +236,16 @@ void end_frame() {
                 g_dbg_rect[i].y2 = bands[i].y2;
                 g_dbg_rect[i].abgr = bands[i].abgr;
             }
-            g_dbg_rect_count += nBands;
+            // Markers on top of bands
+            for (int i = 0; i < nMarkers; ++i) {
+                const Marker& m = markers[i];
+                g_dbg_rect[nBands + i].x1 = m.cx - m.w / 2;
+                g_dbg_rect[nBands + i].x2 = m.cx + m.w / 2;
+                g_dbg_rect[nBands + i].y1 = m.cy - m.h / 2;
+                g_dbg_rect[nBands + i].y2 = m.cy + m.h / 2;
+                g_dbg_rect[nBands + i].abgr = m.abgr;
+            }
+            g_dbg_rect_count += nExtra;
         }
     }
     bgfx::dbgTextClear();
