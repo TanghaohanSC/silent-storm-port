@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include <vector>
 
 extern "C" int PortFillAllRecordsFromStorage();
 
@@ -62,8 +63,35 @@ static inline void* FieldAddr(CDBRecord* rec, const NDb::SColumnInfo& col)
 // equals recordID. We discover rows on the fly per table.
 // `refsFilledOut` accumulates count of type=5 (ref / CPtr<T>) columns that
 // were successfully resolved across all rows in this table.
+// r44: writes a single resolved ref pointer into a vector<CPtr<X>>[idx].
+// `vecPtr` points at the std::vector<CPtr<CDBRecord>>-equivalent at the
+// outer member offset. We resize-up if vec.size() <= elemIdx, then write the
+// raw pointer at element[elemIdx].ptr (CPtrBase stores T* as the only field).
+// Layout-compat note: std::vector<CPtr<X>> and std::vector<CPtr<Y>> have
+// identical memory layout because (a) std::vector layout is independent of T
+// (3 pointers in MSVC's STL), and (b) sizeof(CPtr<X>) == sizeof(void*) for
+// every X (it only stores a T* ptr). resize() may use CPtr<T>'s default
+// ctor (sets ptr=0) and dtor (calls Release on ptr) — for our purposes both
+// are layout-compatible across T because CPtr<X>::ptr is at offset 0 and the
+// AddRef/Release machinery shares CObjectBase::SRef regardless of X.
+static void WriteVecRefSlot(void* vecPtr, int elemIdx, CDBRecord* pTarget)
+{
+    typedef std::vector<CPtr<CDBRecord> > VecT;
+    VecT* v = reinterpret_cast<VecT*>(vecPtr);
+    if ((int)v->size() <= elemIdx) {
+        v->resize(elemIdx + 1);
+    }
+    // CPtr<T> derives from CPtrBase<T, SRef> which stores a single T* `ptr`
+    // at offset 0. Write the raw pointer directly — bypasses refcount but
+    // we already do this for scalar refs. Records leak intentionally (live
+    // for the duration of the load).
+    CPtr<CDBRecord>* slot = &(*v)[elemIdx];
+    *reinterpret_cast<CDBRecord**>(slot) = pTarget;
+}
+
 static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE* log,
-                        int* refsFilledOut, int* refsMissedOut)
+                        int* refsFilledOut, int* refsMissedOut,
+                        int* vecRefsFilledOut, int* vecRefsMissedOut)
 {
     CDBTableDataStorage* s = table->GetStorage();
     if (!s) return 0;
@@ -74,6 +102,8 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
     int filled = 0;
     int refsFilled = 0;
     int refsMissed = 0;
+    int vecRefsFilled = 0;
+    int vecRefsMissed = 0;
     int nRows = (int)s->m_buckets.size();
     for (int row = 0; row < nRows; ++row) {
         if (s->m_buckets[row].empty()) continue;
@@ -170,6 +200,43 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
                     ++filled;
                     break;
                 }
+                case 6: { // r44: vec_ref — vector<CPtr<X>>[idx] = resolved ref
+                    // The column-name maps to a single int slot (the refID
+                    // for the i-th vector element). offset is the vector's
+                    // offsetof; subOffset is the element index; refClass is
+                    // the inner X class.
+                    std::map<std::string, int>::const_iterator it = idx.intCols.find(cname);
+                    if (it == idx.intCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (j >= (int)s->m_buckets[row].size()) { ++vecRefsMissed; break; }
+                    int refID = s->m_buckets[row][j];
+                    if (refID <= 0) {
+                        // Legitimate null/empty slot — still need to size the
+                        // vector to at least subOffset+1 so .size() reflects
+                        // the schema's intended capacity. Without this,
+                        // pSide->defaultPersesSet.size() would stay at 0 if
+                        // every entry happens to be null in this row.
+                        void* vec = (char*)rec + c->offset;
+                        WriteVecRefSlot(vec, c->subOffset, 0);
+                        ++filled;
+                        break;
+                    }
+                    if (!c->refClass) { ++vecRefsMissed; break; }
+                    NDb::STableCandidates cands = NDb::GetTableIDsForClassName(c->refClass);
+                    CDBRecord* pRefTarget = 0;
+                    for (int k = 0; k < cands.count; ++k) {
+                        CDBTableBase* pTargetTable = NDatabase::GetTable(cands.ids[k]);
+                        if (!pTargetTable) continue;
+                        pRefTarget = pTargetTable->GetDBRecord(refID);
+                        if (pRefTarget) break;
+                    }
+                    if (!pRefTarget) { ++vecRefsMissed; break; }
+                    void* vec = (char*)rec + c->offset;
+                    WriteVecRefSlot(vec, c->subOffset, pRefTarget);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
                 default:
                     break;
             }
@@ -177,9 +244,11 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
     }
     if (refsFilledOut) *refsFilledOut += refsFilled;
     if (refsMissedOut) *refsMissedOut += refsMissed;
+    if (vecRefsFilledOut) *vecRefsFilledOut += vecRefsFilled;
+    if (vecRefsMissedOut) *vecRefsMissedOut += vecRefsMissed;
     if (log) {
-        fprintf(log, "  fill table: %d rows, %d field-writes (refs filled=%d missed=%d)\n",
-                nRows, filled, refsFilled, refsMissed);
+        fprintf(log, "  fill table: %d rows, %d field-writes (refs filled=%d missed=%d, vecRefs filled=%d missed=%d)\n",
+                nRows, filled, refsFilled, refsMissed, vecRefsFilled, vecRefsMissed);
     }
     return filled;
 }
@@ -202,6 +271,8 @@ extern "C" int PortFillAllRecordsFromStorage()
     int tablesHit = 0;
     int totalRefsFilled = 0;
     int totalRefsMissed = 0;
+    int totalVecRefsFilled = 0;
+    int totalVecRefsMissed = 0;
     for (int i = 0; i < nSchemas; ++i) {
         const NDb::SSchemaEntry& e = schemas[i];
         CDBTableBase* table = NDatabase::GetTable(e.typeID);
@@ -211,7 +282,8 @@ extern "C" int PortFillAllRecordsFromStorage()
         }
         if (log) fprintf(log, "schema[0x%08X]:\n", e.typeID);
         const NDb::SColumnInfo* cols = e.getter();
-        int n = FillOneTable(table, cols, log, &totalRefsFilled, &totalRefsMissed);
+        int n = FillOneTable(table, cols, log, &totalRefsFilled, &totalRefsMissed,
+                             &totalVecRefsFilled, &totalVecRefsMissed);
         if (n > 0) ++tablesHit;
         totalWritten += n;
     }
@@ -221,6 +293,8 @@ extern "C" int PortFillAllRecordsFromStorage()
                 totalWritten, tablesHit, nSchemas);
         fprintf(log, "r30 dbfill: refs filled=%d, refs missed=%d\n",
                 totalRefsFilled, totalRefsMissed);
+        fprintf(log, "r44 dbfill: vecRefs filled=%d, vecRefs missed=%d\n",
+                totalVecRefsFilled, totalVecRefsMissed);
         fclose(log);
     }
     return totalWritten;

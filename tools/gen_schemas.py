@@ -35,6 +35,11 @@ T_FLOAT = 2
 T_STRING = 3
 T_WSTRING = 4
 T_REF = 5
+# r44: vector<CPtr<X>> element write. Outer offset points at the vector itself.
+# `vectorIdx` (stored in SColumnInfo.subOffset) is the element index.
+# `refClass` names the inner class (X). Runtime: resize vector to idx+1
+# if needed, then write resolved ref into element[idx].ptr.
+T_VEC_REF = 6
 
 # C++ leaf-type spellings → type code (used after stripping const/refs).
 PRIMITIVE_TYPE_MAP = {
@@ -85,7 +90,7 @@ NAME_TYPE_FALLBACK = [
 
 
 def code_to_comment(code: int) -> str:
-    return {0: "int", 1: "bool", 2: "float", 3: "string", 4: "wstring", 5: "ref"}[code]
+    return {0: "int", 1: "bool", 2: "float", 3: "string", 4: "wstring", 5: "ref", 6: "vec_ref"}[code]
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +148,9 @@ class HeaderInfo:
     classes: dict
     # ClassName -> source header file name (basename only).
     class_to_header: dict
+    # r44: enum-constant -> integer value (global table, all enums merged).
+    # Used to resolve `vec[MEDIC]` -> `vec[0]` etc. in ImportField calls.
+    enum_values: dict = None
 
 
 # Match a member declaration. Captures: full type plus a comma-separated list
@@ -274,10 +282,70 @@ def find_class_bodies(src: str) -> list[tuple[str, int, int]]:
     return results
 
 
+ENUM_BLOCK_RE = re.compile(
+    r"\benum\s+(?:class\s+)?(?:[A-Za-z_]\w*\s*)?\{([^{}]*)\}",
+)
+
+
+def parse_enums(src: str) -> dict:
+    """Parse all enum bodies, return {Identifier: int_value} merged across all
+    enums in the source. Supports `NAME`, `NAME = LITERAL`, and `NAME = OTHER`
+    where OTHER was already seen in the same enum. Skips identifiers it can't
+    resolve to a literal int."""
+    out = {}
+    for m in ENUM_BLOCK_RE.finditer(src):
+        body = m.group(1)
+        # Strip line comments inside the enum body.
+        body = re.sub(r"//[^\n]*", "", body)
+        body = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
+        cur_val = 0
+        # locally-scoped table for cross-references inside this enum
+        local = {}
+        for ent in body.split(","):
+            ent = ent.strip()
+            if not ent:
+                continue
+            if "=" in ent:
+                name, _, rhs = ent.partition("=")
+                name = name.strip()
+                rhs = rhs.strip()
+                # Try literal int
+                try:
+                    if rhs.lower().startswith("0x"):
+                        v = int(rhs, 16)
+                    else:
+                        v = int(rhs, 10)
+                    cur_val = v
+                except ValueError:
+                    # Reference to another enum constant?
+                    v = local.get(rhs)
+                    if v is None:
+                        v = out.get(rhs)
+                    if v is None:
+                        # Give up on this entry; reset cur_val resumption.
+                        continue
+                    cur_val = v
+            else:
+                name = ent
+            # Only accept simple identifiers (skip anything with brackets etc.)
+            if not re.match(r"^[A-Za-z_]\w*$", name):
+                continue
+            local[name] = cur_val
+            out.setdefault(name, cur_val)
+            cur_val += 1
+    return out
+
+
 def parse_header(path: Path) -> HeaderInfo:
     src = path.read_text(encoding="utf-8", errors="replace")
     src = strip_comments(src)
-    info = HeaderInfo(classes={}, class_to_header={})
+    info = HeaderInfo(
+        classes={},
+        class_to_header={},
+        enum_values=parse_enums(src),
+    )
+    # r44: per-class enum scope (enum bodies declared within this class's body).
+    info.per_class_enums = {}  # cls_name -> {ident: int_value}
     for cls_name, body_start, body_end in find_class_bodies(src):
         body = src[body_start:body_end]
         # Skip nested classes' inner contents by remembering top-level only:
@@ -299,6 +367,10 @@ def parse_header(path: Path) -> HeaderInfo:
                 members[mname] = tname
         info.classes[cls_name] = members
         info.class_to_header[cls_name] = path.name
+        # r44: scrape any enum blocks directly nested in this class body
+        # (not in deeper nested classes — `parse_enums` on the raw body is
+        # fine for our simple shapes; the regex won't cross top-level braces).
+        info.per_class_enums[cls_name] = parse_enums(body)
     return info
 
 
@@ -372,7 +444,7 @@ IMPORTFIELD_STMT_RE = re.compile(
     r"""\bNDatabase\s*::\s*ImportField\s*\(\s*
         "(?P<colname>[^"\\]*)"\s*,\s*
         &\s*(?P<outer>[A-Za-z_]\w*)
-        (?:\s*\[\s*(?P<idx>\d+)\s*\])?
+        (?:\s*\[\s*(?P<idx>\d+|[A-Za-z_]\w*)\s*\])?
         (?:\s*\.\s*(?P<sub>[A-Za-z_]\w*))?
         \s*\)\s*;
     """,
@@ -386,6 +458,7 @@ class ImportCall:
     outer: str
     sub: str | None
     idx: int | None = None  # r32: array index for outer[idx] expressions
+    idx_name: str | None = None  # r44: enum identifier (resolved post-parse to int)
 
 
 @dataclass
@@ -534,7 +607,7 @@ def parse_cpp(path: Path):
         # by column name (keep first occurrence). Non-matching code is
         # silently ignored (we just take what we recognise).
         # Track imports keyed by (cname) so per-class dedupe works.
-        raw_calls = []  # list of (cname, outer, sub, idx)
+        raw_calls = []  # list of (cname, outer, sub, idx, idx_name)
         seen_cols = set()
         for sm in IMPORTFIELD_STMT_RE.finditer(body):
             cname = sm.group("colname")
@@ -542,12 +615,20 @@ def parse_cpp(path: Path):
                 continue
             seen_cols.add(cname)
             idx_str = sm.group("idx")
+            idx_val = None
+            idx_name = None
+            if idx_str is not None:
+                if idx_str.isdigit() or (idx_str.startswith("-") and idx_str[1:].isdigit()):
+                    idx_val = int(idx_str)
+                else:
+                    idx_name = idx_str
             raw_calls.append(
                 (
                     cname,
                     sm.group("outer"),
                     sm.group("sub"),
-                    int(idx_str) if idx_str is not None else None,
+                    idx_val,
+                    idx_name,
                 )
             )
         # Defer member-presence filtering to caller (needs header_infos).
@@ -672,6 +753,13 @@ def main() -> int:
     # Parse all headers up front.
     header_infos = [parse_header(h) for h in h_files]
 
+    # r44: merge all enum constants across headers into a single resolver.
+    enum_values = {}
+    for hi in header_infos:
+        if hi.enum_values:
+            for k, v in hi.enum_values.items():
+                enum_values.setdefault(k, v)
+
     # Build a map: class -> header basename, for include-list generation.
     class_to_header = {}
     for hi in header_infos:
@@ -727,12 +815,29 @@ def main() -> int:
         return None
 
     CONTAINER_RE = re.compile(r"^(?:const\s+)?(?:std::)?(vector|list|set|map|deque)\s*<")
+    # r44: detect vector<CPtr<X>> / vector<CObj<X>> / etc., capturing inner X.
+    VEC_OF_PTR_RE = re.compile(
+        r"^(?:const\s+)?(?:std::)?vector\s*<\s*(?:CPtr|CRndPtr|CDBPtr|CWeakPtr|CObj)\s*<\s*([A-Za-z_][\w:]*)\s*>\s*>\s*$",
+    )
 
     def member_is_container(cls, name):
         t = member_decl_type(cls, name)
         if not t:
             return False
         return bool(CONTAINER_RE.match(t.strip()))
+
+    def member_vec_inner_class(cls, name):
+        """If `cls::name` is a vector<CPtr<X>> (or similar smart-ptr vector),
+        return the inner class X with namespace stripped; else None."""
+        t = member_decl_type(cls, name)
+        if not t:
+            return None
+        t = t.strip()
+        m = VEC_OF_PTR_RE.match(t)
+        if not m:
+            return None
+        inner = m.group(1).strip().rsplit("::", 1)[-1]
+        return inner
 
     all_parsed = []
     all_skipped = []
@@ -750,14 +855,43 @@ def main() -> int:
         for cls, info in db_regs.items():
             all_db_regs.setdefault(cls, info)
 
+    # r44: resolve enum-named indices to integer indices.
+    # Lookup priority:
+    #   1) enum declared inside the same class (walking up the inheritance chain)
+    #   2) global merged enum table
+    def resolve_enum_name(cls_name, ident):
+        cur = cls_name
+        seen = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            for hi in header_infos:
+                scope = getattr(hi, "per_class_enums", {}).get(cur)
+                if scope and ident in scope:
+                    return scope[ident]
+            cur = base_classes.get(cur)
+        return enum_values.get(ident)
+
+    unresolved_enum_idx = 0
+    for p in all_parsed:
+        for c in p.fields:
+            if c.idx is None and c.idx_name is not None:
+                v = resolve_enum_name(p.class_name, c.idx_name)
+                if v is not None:
+                    c.idx = v
+                else:
+                    unresolved_enum_idx += 1
+
     # r32: drop any ImportField whose outer identifier isn't a member of the
     # owning class (or any base) — those are local-variable imports the
     # game uses for scratch / unpack patterns (e.g. `string szFlags;
     # ImportField("Flags", &szFlags); UnpackVariantFlags(szFlags,...)`).
     # Also drop indexed access into vector/list members — offsetof can't
     # reach inside a heap container.
+    # r44: KEEP indexed access into vector<CPtr<X>> members — runtime can
+    # resize the vector and write element[idx] directly (T_VEC_REF).
     dropped_local_count = 0
     dropped_container_idx_count = 0
+    kept_vec_ref_count = 0
     for p in all_parsed:
         kept = []
         for c in p.fields:
@@ -765,7 +899,17 @@ def main() -> int:
                 dropped_local_count += 1
                 continue
             if c.idx is not None and member_is_container(p.class_name, c.outer):
-                dropped_container_idx_count += 1
+                inner = member_vec_inner_class(p.class_name, c.outer)
+                if inner is None:
+                    # not vector<CPtr<X>> — still un-fillable (e.g. vector<int>
+                    # indexed; vector<CObj<...>> with non-record element type).
+                    dropped_container_idx_count += 1
+                    continue
+                # vector<CPtr<X>> at outer[idx] — keep as T_VEC_REF.
+                # Stash the resolved inner class on the call so emit can use it.
+                c._vec_inner = inner
+                kept.append(c)
+                kept_vec_ref_count += 1
                 continue
             kept.append(c)
         p.fields = kept
@@ -791,10 +935,10 @@ def main() -> int:
     lines.append("")
     lines.append("struct SColumnInfo {")
     lines.append("    const char* name;")
-    lines.append("    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>)")
+    lines.append("    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>), 6=vec_ref(vector<CPtr<T>>[idx])")
     lines.append("    int offset;     // offsetof(class, outer_member)")
-    lines.append("    int subOffset;  // offsetof(struct, sub_member) for nested fields, else 0")
-    lines.append("    const char* refClass; // for type=5, target record class name (e.g. \"CTexture\"); else nullptr")
+    lines.append("    int subOffset;  // type 0-5: offsetof(struct, sub_member) or 0; type 6: vector element index")
+    lines.append("    const char* refClass; // for type=5/6, target record class name (e.g. \"CTexture\"); else nullptr")
     lines.append("};")
     lines.append("")
     lines.append("template<typename T> const SColumnInfo* GetSchemaFor();")
@@ -813,7 +957,12 @@ def main() -> int:
         # Compute column width for tidy formatting.
         max_name_len = max((len(c.colname) for c in p.fields), default=0)
         for call in p.fields:
-            tcode = resolve_type_code(cls, call.outer, call.sub, header_infos)
+            # r44: vector<CPtr<X>>[idx] entries were tagged with _vec_inner.
+            vec_inner = getattr(call, "_vec_inner", None)
+            if vec_inner is not None:
+                tcode = T_VEC_REF
+            else:
+                tcode = resolve_type_code(cls, call.outer, call.sub, header_infos)
             name_lit = f'"{call.colname}",'
             name_field_width = max_name_len + 3  # quotes + trailing comma
             name_lit_padded = name_lit.ljust(name_field_width)
@@ -821,13 +970,19 @@ def main() -> int:
             # into the outer offset using a (char*)&p->outer[idx] - (char*)p
             # cast — works because the result is constexpr-foldable for
             # POD types and small literal indices.
-            if call.idx is not None:
+            if tcode == T_VEC_REF:
+                # r44: offset points at the VECTOR (not the element); idx
+                # lives in subOffset so the runtime can resize + write.
+                offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
+            elif call.idx is not None:
                 offset_expr = (
                     f"(int)((char*)&((NDb::{cls}*)1)->{call.outer}[{call.idx}] - (char*)1)"
                 )
             else:
                 offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
-            if call.sub is None:
+            if tcode == T_VEC_REF:
+                sub_expr = str(call.idx)
+            elif call.sub is None:
                 sub_expr = "0"
             else:
                 outer_struct = resolve_outer_struct_type(cls, call.outer, header_infos)
@@ -836,6 +991,8 @@ def main() -> int:
                 else:
                     sub_expr = f"offsetof({outer_struct}, {call.sub})"
             ref_expr = "nullptr"
+            if tcode == T_VEC_REF:
+                ref_expr = f'"{vec_inner}"'
             if tcode == T_REF and call.sub is None:
                 inner = resolve_ref_inner_class(cls, call.outer, header_infos)
                 if inner is not None:
@@ -1001,6 +1158,9 @@ def main() -> int:
     print(f"Total columns:  {total_cols}")
     print(f"Dropped ImportFields (local var, not class member): {dropped_local_count}")
     print(f"Dropped ImportFields (indexed access into vector/list): {dropped_container_idx_count}")
+    print(f"Kept ImportFields (T_VEC_REF, vector<CPtr<X>>[idx]):    {kept_vec_ref_count}")
+    print(f"Unresolved enum-named indices: {unresolved_enum_idx}")
+    print(f"Enum constants captured: {len(enum_values)}")
     print(f"Classes skipped: {len(all_skipped)}")
     for s in all_skipped:
         print(f"  - {s.class_name}  ({s.cpp_file}:{s.line_no})  {s.reason}")

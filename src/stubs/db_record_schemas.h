@@ -28,10 +28,10 @@ namespace NDb {
 
 struct SColumnInfo {
     const char* name;
-    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>)
+    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>), 6=vec_ref(vector<CPtr<T>>[idx])
     int offset;     // offsetof(class, outer_member)
-    int subOffset;  // offsetof(struct, sub_member) for nested fields, else 0
-    const char* refClass; // for type=5, target record class name (e.g. "CTexture"); else nullptr
+    int subOffset;  // type 0-5: offsetof(struct, sub_member) or 0; type 6: vector element index
+    const char* refClass; // for type=5/6, target record class name (e.g. "CTexture"); else nullptr
 };
 
 template<typename T> const SColumnInfo* GetSchemaFor();
@@ -659,6 +659,18 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CUIContainer>() {
     return cols;
 }
 
+// CUITexture  (from DataInterface.cpp:99)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CUITexture>() {
+    static const SColumnInfo cols[] = {
+        { "R_800x600",   5, (int)((char*)&((NDb::CUITexture*)1)->pTextures[0] - (char*)1), 0, "CTexture" },  // ref
+        { "R_1024x768",  5, (int)((char*)&((NDb::CUITexture*)1)->pTextures[1] - (char*)1), 0, "CTexture" },  // ref
+        { "R_1280x960",  5, (int)((char*)&((NDb::CUITexture*)1)->pTextures[2] - (char*)1), 0, "CTexture" },  // ref
+        { "R_1600x1200", 5, (int)((char*)&((NDb::CUITexture*)1)->pTextures[3] - (char*)1), 0, "CTexture" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CGlobalMap  (from DataMap.cpp:79)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CGlobalMap>() {
     static const SColumnInfo cols[] = {
@@ -968,8 +980,11 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBPerk>() {
 // CDBPerkTreeNode  (from DataPerk.cpp:29)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBPerkTreeNode>() {
     static const SColumnInfo cols[] = {
-        { "PerkTreeID", 0, offsetof(NDb::CDBPerkTreeNode, nTreeID), 0, nullptr },  // int
-        { "PerkID",     5, offsetof(NDb::CDBPerkTreeNode, pPerk), 0, "CDBPerk" },  // ref
+        { "PerkTreeID",    0, offsetof(NDb::CDBPerkTreeNode, nTreeID), 0, nullptr },  // int
+        { "PerkID",        5, offsetof(NDb::CDBPerkTreeNode, pPerk), 0, "CDBPerk" },  // ref
+        { "ParentPerkID1", 6, offsetof(NDb::CDBPerkTreeNode, parentPerks), 0, "CDBPerk" },  // vec_ref
+        { "ParentPerkID2", 6, offsetof(NDb::CDBPerkTreeNode, parentPerks), 1, "CDBPerk" },  // vec_ref
+        { "ParentPerkID3", 6, offsetof(NDb::CDBPerkTreeNode, parentPerks), 2, "CDBPerk" },  // vec_ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -1142,6 +1157,12 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGWeapon>() {
         { "TrailSpeed",            2, offsetof(NDb::CRPGWeapon, fTrailSpeed), 0, nullptr },  // float
         { "TrailEffectID",         5, offsetof(NDb::CRPGWeapon, pTrailEffect), 0, "CTRndModel" },  // ref
         { "TrailParticleID",       5, offsetof(NDb::CRPGWeapon, pTrailParticle), 0, "CTEffect" },  // ref
+        { "SnapShot",              1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[0] - (char*)1), 0, nullptr },  // bool
+        { "AimedShot",             1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[1] - (char*)1), 0, nullptr },  // bool
+        { "CarefulShot",           1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[2] - (char*)1), 0, nullptr },  // bool
+        { "ShortBurst",            1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[3] - (char*)1), 0, nullptr },  // bool
+        { "LongBurst",             1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[4] - (char*)1), 0, nullptr },  // bool
+        { "SnipeShot",             1, (int)((char*)&((NDb::CRPGWeapon*)1)->shootModes[5] - (char*)1), 0, nullptr },  // bool
         { "InnerClip",             5, offsetof(NDb::CRPGWeapon, pInnerClip), 0, "CRPGClip" },  // ref
         { "InnerClipAmmoQuantity", 0, offsetof(NDb::CRPGWeapon, nInnerClipAmmoQuantity), 0, nullptr },  // int
         { "PanzerkleinWeaponType", 0, offsetof(NDb::CRPGWeapon, nPanzerkleinType), 0, nullptr },  // int
@@ -1446,6 +1467,18 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CNationality>() {
         { "FlagTexture",         5, offsetof(NDb::CNationality, pFlag), 0, "CUITexture" },  // ref
         { "IconNormalTexture",   5, offsetof(NDb::CNationality, pIconNormal), 0, "CUITexture" },  // ref
         { "IconDisabledTexture", 5, offsetof(NDb::CNationality, pIconDisabled), 0, "CUITexture" },  // ref
+        { "MaleCustomHead1",     6, offsetof(NDb::CNationality, customMaleHeads), 0, "CComplexHead" },  // vec_ref
+        { "MaleCustomHead2",     6, offsetof(NDb::CNationality, customMaleHeads), 1, "CComplexHead" },  // vec_ref
+        { "MaleCustomHead3",     6, offsetof(NDb::CNationality, customMaleHeads), 2, "CComplexHead" },  // vec_ref
+        { "MaleCustomHead4",     6, offsetof(NDb::CNationality, customMaleHeads), 3, "CComplexHead" },  // vec_ref
+        { "MaleCustomHead5",     6, offsetof(NDb::CNationality, customMaleHeads), 4, "CComplexHead" },  // vec_ref
+        { "MaleCustomHead6",     6, offsetof(NDb::CNationality, customMaleHeads), 5, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead1",   6, offsetof(NDb::CNationality, customFemaleHeads), 0, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead2",   6, offsetof(NDb::CNationality, customFemaleHeads), 1, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead3",   6, offsetof(NDb::CNationality, customFemaleHeads), 2, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead4",   6, offsetof(NDb::CNationality, customFemaleHeads), 3, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead5",   6, offsetof(NDb::CNationality, customFemaleHeads), 4, "CComplexHead" },  // vec_ref
+        { "FemaleCustomHead6",   6, offsetof(NDb::CNationality, customFemaleHeads), 5, "CComplexHead" },  // vec_ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -1460,6 +1493,24 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CSide>() {
         { "Nationality1",       5, offsetof(NDb::CSide, pNationality1), 0, "CNationality" },  // ref
         { "Nationality2",       5, offsetof(NDb::CSide, pNationality2), 0, "CNationality" },  // ref
         { "Nationality3",       5, offsetof(NDb::CSide, pNationality3), 0, "CNationality" },  // ref
+        { "MaleMedic",          6, offsetof(NDb::CSide, malePersesSet), 0, "CRPGPers" },  // vec_ref
+        { "MaleScout",          6, offsetof(NDb::CSide, malePersesSet), 1, "CRPGPers" },  // vec_ref
+        { "MaleSniper",         6, offsetof(NDb::CSide, malePersesSet), 2, "CRPGPers" },  // vec_ref
+        { "MaleSoldier",        6, offsetof(NDb::CSide, malePersesSet), 3, "CRPGPers" },  // vec_ref
+        { "MaleEngineer",       6, offsetof(NDb::CSide, malePersesSet), 4, "CRPGPers" },  // vec_ref
+        { "MaleGrenadier",      6, offsetof(NDb::CSide, malePersesSet), 5, "CRPGPers" },  // vec_ref
+        { "FemaleMedic",        6, offsetof(NDb::CSide, femalePersesSet), 0, "CRPGPers" },  // vec_ref
+        { "FemaleScout",        6, offsetof(NDb::CSide, femalePersesSet), 1, "CRPGPers" },  // vec_ref
+        { "FemaleSniper",       6, offsetof(NDb::CSide, femalePersesSet), 2, "CRPGPers" },  // vec_ref
+        { "FemaleSoldier",      6, offsetof(NDb::CSide, femalePersesSet), 3, "CRPGPers" },  // vec_ref
+        { "FemaleEngineer",     6, offsetof(NDb::CSide, femalePersesSet), 4, "CRPGPers" },  // vec_ref
+        { "FemaleGrenadier",    6, offsetof(NDb::CSide, femalePersesSet), 5, "CRPGPers" },  // vec_ref
+        { "Nationality1Male",   6, offsetof(NDb::CSide, defaultPersesSet), 0, "CRPGPers" },  // vec_ref
+        { "Nationality1Female", 6, offsetof(NDb::CSide, defaultPersesSet), 1, "CRPGPers" },  // vec_ref
+        { "Nationality2Male",   6, offsetof(NDb::CSide, defaultPersesSet), 2, "CRPGPers" },  // vec_ref
+        { "Nationality2Female", 6, offsetof(NDb::CSide, defaultPersesSet), 3, "CRPGPers" },  // vec_ref
+        { "Nationality3Male",   6, offsetof(NDb::CSide, defaultPersesSet), 4, "CRPGPers" },  // vec_ref
+        { "Nationality3Female", 6, offsetof(NDb::CSide, defaultPersesSet), 5, "CRPGPers" },  // vec_ref
         { "ESCMenuBackground",  5, offsetof(NDb::CSide, pESCMenuBackground), 0, "CUITexture" },  // ref
         { "UIBaseFlag",         5, offsetof(NDb::CSide, pBaseFlag), 0, "CUITexture" },  // ref
         { "UIBaseFlagActive",   5, offsetof(NDb::CSide, pBaseFlagActive), 0, "CUITexture" },  // ref
@@ -1530,6 +1581,11 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioClue>() {
     static const SColumnInfo cols[] = {
         { "Scenario",         5, offsetof(NDb::CDBScenarioClue, pScenario), 0, "CDBScenario" },  // ref
         { "State",            5, offsetof(NDb::CDBScenarioClue, pState), 0, "CDBScenarioState" },  // ref
+        { "ZoneToPlace1",     6, offsetof(NDb::CDBScenarioClue, zonesToPlace), 0, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToPlace2",     6, offsetof(NDb::CDBScenarioClue, zonesToPlace), 1, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToPlace3",     6, offsetof(NDb::CDBScenarioClue, zonesToPlace), 2, "CDBScenarioZone" },  // vec_ref
+        { "Objective1",       6, offsetof(NDb::CDBScenarioClue, objectives), 0, "CDBScenarioObjective" },  // vec_ref
+        { "Objective2",       6, offsetof(NDb::CDBScenarioClue, objectives), 1, "CDBScenarioObjective" },  // vec_ref
         { "SmallDescription", 3, offsetof(NDb::CDBScenarioClue, sSmallDescription), 0, nullptr },  // string
         { "ItemID",           0, offsetof(NDb::CDBScenarioClue, nItemID), 0, nullptr },  // int
         { "PersID",           0, offsetof(NDb::CDBScenarioClue, nPersID), 0, nullptr },  // int
@@ -1545,8 +1601,14 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioClue>() {
 // CDBScenarioObjective  (from DataScenario.cpp:91)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioObjective>() {
     static const SColumnInfo cols[] = {
-        { "Description", 5, offsetof(NDb::CDBScenarioObjective, pDescription), 0, "CString" },  // ref
-        { "Scenario",    5, offsetof(NDb::CDBScenarioObjective, pScenario), 0, "CDBScenario" },  // ref
+        { "ZoneToOpen1",  6, offsetof(NDb::CDBScenarioObjective, zonesToOpen), 0, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToOpen2",  6, offsetof(NDb::CDBScenarioObjective, zonesToOpen), 1, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToOpen3",  6, offsetof(NDb::CDBScenarioObjective, zonesToOpen), 2, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToBlock1", 6, offsetof(NDb::CDBScenarioObjective, zonesToBlock), 0, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToBlock2", 6, offsetof(NDb::CDBScenarioObjective, zonesToBlock), 1, "CDBScenarioZone" },  // vec_ref
+        { "ZoneToBlock3", 6, offsetof(NDb::CDBScenarioObjective, zonesToBlock), 2, "CDBScenarioZone" },  // vec_ref
+        { "Description",  5, offsetof(NDb::CDBScenarioObjective, pDescription), 0, "CString" },  // ref
+        { "Scenario",     5, offsetof(NDb::CDBScenarioObjective, pScenario), 0, "CDBScenario" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -1631,6 +1693,7 @@ inline const SColumnInfo* getSchemaCUIContainer() { return GetSchemaFor<NDb::CUI
 inline const SColumnInfo* getSchemaCString() { return GetSchemaFor<NDb::CString>(); }
 inline const SColumnInfo* getSchemaCRndConstructionPart() { return GetSchemaFor<NDb::CRndConstructionPart>(); }
 inline const SColumnInfo* getSchemaCGrass() { return GetSchemaFor<NDb::CGrass>(); }
+inline const SColumnInfo* getSchemaCUITexture() { return GetSchemaFor<NDb::CUITexture>(); }
 inline const SColumnInfo* getSchemaCRndTerrainSpot() { return GetSchemaFor<NDb::CRndTerrainSpot>(); }
 inline const SColumnInfo* getSchemaCRPGCritical() { return GetSchemaFor<NDb::CRPGCritical>(); }
 inline const SColumnInfo* getSchemaCAISound() { return GetSchemaFor<NDb::CAISound>(); }
@@ -1740,6 +1803,7 @@ inline const SSchemaEntry* GetAllSchemas(int* outCount) {
         { 0x0000002d, &getSchemaCString },  // Strings
         { 0x0000002f, &getSchemaCRndConstructionPart },  // ConstructionParts
         { 0x00000030, &getSchemaCGrass },  // Grass
+        { 0x00000031, &getSchemaCUITexture },  // UITextures
         { 0x00000032, &getSchemaCRndTerrainSpot },  // TerrainSpots
         { 0x00000033, &getSchemaCRPGCritical },  // RPGCriticals
         { 0x00000034, &getSchemaCAISound },  // AISounds
