@@ -302,6 +302,78 @@ HRESULT __stdcall FacadeIndexBuffer::GetDesc(D3DINDEXBUFFER_DESC* pDesc) {
 }
 
 // ---------------------------------------------------------------------------
+// FacadeCubeTexture
+// ---------------------------------------------------------------------------
+FacadeCubeTexture::FacadeCubeTexture(UINT edge, UINT levels, DWORD usage, D3DFORMAT fmt, D3DPOOL pool)
+    : edge_length(edge), levels_(levels ? levels : 1), usage_(usage), format(fmt), pool_(pool)
+{
+    // 6 faces × levels staging slots
+    face_staging_.resize(6 * levels_);
+}
+
+FacadeCubeTexture::~FacadeCubeTexture() = default;
+
+HRESULT __stdcall FacadeCubeTexture::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DResource9 ||
+        riid == IID_IDirect3DBaseTexture9 || riid == IID_IDirect3DCubeTexture9) {
+        *ppv = static_cast<IDirect3DCubeTexture9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadeCubeTexture::AddRef() { return ++ref_count_; }
+ULONG __stdcall FacadeCubeTexture::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadeCubeTexture::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+HRESULT __stdcall FacadeCubeTexture::GetLevelDesc(UINT level, D3DSURFACE_DESC* pDesc) {
+    if (!pDesc) return D3DERR_INVALIDCALL;
+    std::memset(pDesc, 0, sizeof(*pDesc));
+    UINT s = edge_length >> level; if (s == 0) s = 1;
+    pDesc->Format = format;
+    pDesc->Type   = D3DRTYPE_SURFACE;
+    pDesc->Usage  = usage_;
+    pDesc->Pool   = pool_;
+    pDesc->Width  = s;
+    pDesc->Height = s;
+    return D3D_OK;
+}
+HRESULT __stdcall FacadeCubeTexture::GetCubeMapSurface(D3DCUBEMAP_FACES /*face*/, UINT level, IDirect3DSurface9** ppSurf) {
+    if (!ppSurf) return D3DERR_INVALIDCALL;
+    UINT s = edge_length >> level; if (s == 0) s = 1;
+    *ppSurf = new FacadeSurface(s, s, format);
+    return D3D_OK;
+}
+HRESULT __stdcall FacadeCubeTexture::LockRect(D3DCUBEMAP_FACES face, UINT level, D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*flags*/) {
+    if (!pLockedRect || level >= levels_) return D3DERR_INVALIDCALL;
+    UINT s = edge_length >> level; if (s == 0) s = 1;
+    uint32_t bpp = bytes_per_pixel(format);
+    pitch_bytes_ = s * bpp;
+    UINT slot = static_cast<UINT>(face) * levels_ + level;
+    if (slot >= face_staging_.size()) return D3DERR_INVALIDCALL;
+    auto& buf = face_staging_[slot];
+    if (buf.empty()) buf.resize(pitch_bytes_ * s);
+    pLockedRect->Pitch = static_cast<INT>(pitch_bytes_);
+    pLockedRect->pBits = buf.data();
+    locked_ = true;
+    locked_face_ = static_cast<UINT>(face);
+    locked_level_ = level;
+    return D3D_OK;
+}
+HRESULT __stdcall FacadeCubeTexture::UnlockRect(D3DCUBEMAP_FACES /*face*/, UINT /*level*/) {
+    locked_ = false;
+    return D3D_OK;
+}
+
+// ---------------------------------------------------------------------------
 // FacadeSurface
 // ---------------------------------------------------------------------------
 FacadeSurface::FacadeSurface(UINT w, UINT h, D3DFORMAT fmt)

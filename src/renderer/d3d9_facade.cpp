@@ -271,11 +271,12 @@ HRESULT __stdcall D3D9Facade::CreateVolumeTexture(UINT /*Width*/, UINT /*Height*
     if (ppVT) *ppVT = nullptr;
     return E_NOTIMPL;
 }
-HRESULT __stdcall D3D9Facade::CreateCubeTexture(UINT /*EdgeLength*/, UINT /*Levels*/, DWORD /*Usage*/,
-                                                  D3DFORMAT /*Format*/, D3DPOOL /*Pool*/,
+HRESULT __stdcall D3D9Facade::CreateCubeTexture(UINT EdgeLength, UINT Levels, DWORD Usage,
+                                                  D3DFORMAT Format, D3DPOOL Pool,
                                                   IDirect3DCubeTexture9** ppCT, HANDLE* /*pSharedHandle*/) {
-    if (ppCT) *ppCT = nullptr;
-    return E_NOTIMPL;
+    if (!ppCT) return D3DERR_INVALIDCALL;
+    *ppCT = new FacadeCubeTexture(EdgeLength, Levels, Usage, Format, Pool);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateVertexBuffer(UINT Length, DWORD Usage, DWORD FVF,
                                                    D3DPOOL Pool, IDirect3DVertexBuffer9** ppVB,
