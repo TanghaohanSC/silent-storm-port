@@ -3,13 +3,18 @@
 
 #include <cstddef>
 
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataAI.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataAck.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataAnimation.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataCamera.h"
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataDifficulty.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataFormat.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataGeometry.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataInterface.h"
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataLight.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataMap.h"
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataObject.h"
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataPerk.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataRPG.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataRPGTmp.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataRpgConstants.h"
@@ -17,6 +22,7 @@
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataScript.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataSound.h"
 #include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataTerrain.h"
+#include "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/DataText.h"
 
 namespace NDb {
 
@@ -29,6 +35,43 @@ struct SColumnInfo {
 };
 
 template<typename T> const SColumnInfo* GetSchemaFor();
+
+// CDBAckInfo  (from DataAck.cpp:12)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBAckInfo>() {
+    static const SColumnInfo cols[] = {
+        { "WhoID",    0, offsetof(NDb::CDBAckInfo, nRPGPersID), 0, nullptr },  // int
+        { "StringID", 5, offsetof(NDb::CDBAckInfo, pText), 0, "CString" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBAckSequence  (from DataAck.cpp:42)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBAckSequence>() {
+    static const SColumnInfo cols[] = {
+        { "Priority", 0, offsetof(NDb::CDBAckSequence, nPriority), 0, nullptr },  // int
+        { "AckID0",   5, (int)((char*)&((NDb::CDBAckSequence*)1)->pDBAckInfo[0] - (char*)1), 0, "CDBAckInfo" },  // ref
+        { "AckID1",   5, (int)((char*)&((NDb::CDBAckSequence*)1)->pDBAckInfo[1] - (char*)1), 0, "CDBAckInfo" },  // ref
+        { "AckID2",   5, (int)((char*)&((NDb::CDBAckSequence*)1)->pDBAckInfo[2] - (char*)1), 0, "CDBAckInfo" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBAck  (from DataAck.cpp:61)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBAck>() {
+    static const SColumnInfo cols[] = {
+        { "WhoID",       0, offsetof(NDb::CDBAck, nRPGPersID), 0, nullptr },  // int
+        { "Probability", 2, offsetof(NDb::CDBAck, fProbability), 0, nullptr },  // float
+        { "AckSeqID",    5, offsetof(NDb::CDBAck, pAckSequence), 0, "CDBAckSequence" },  // ref
+        { "ConditionID", 0, offsetof(NDb::CDBAck, nConditionID), 0, nullptr },  // int
+        { "Param0",      3, (int)((char*)&((NDb::CDBAck*)1)->sParam[0] - (char*)1), 0, nullptr },  // string
+        { "Param1",      3, (int)((char*)&((NDb::CDBAck*)1)->sParam[1] - (char*)1), 0, nullptr },  // string
+        { "Param2",      3, (int)((char*)&((NDb::CDBAck*)1)->sParam[2] - (char*)1), 0, nullptr },  // string
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
 
 // CDBDialog  (from DataAck.cpp:94)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBDialog>() {
@@ -59,6 +102,21 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBDialogPers>() {
     return cols;
 }
 
+// CAISound  (from DataAI.cpp:25)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CAISound>() {
+    static const SColumnInfo cols[] = {
+        { "Radius",  2, offsetof(NDb::CAISound, fRadius), 0, nullptr },  // float
+        { "SoundID", 5, offsetof(NDb::CAISound, pSound), 0, "CSound" },  // ref
+        { "R1",      2, (int)((char*)&((NDb::CAISound*)1)->vRadius[0] - (char*)1), 0, nullptr },  // float
+        { "R2",      2, (int)((char*)&((NDb::CAISound*)1)->vRadius[1] - (char*)1), 0, nullptr },  // float
+        { "R3",      2, (int)((char*)&((NDb::CAISound*)1)->vRadius[2] - (char*)1), 0, nullptr },  // float
+        { "R4",      2, (int)((char*)&((NDb::CAISound*)1)->vRadius[3] - (char*)1), 0, nullptr },  // float
+        { "R5",      2, (int)((char*)&((NDb::CAISound*)1)->vRadius[4] - (char*)1), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CDBCamera  (from DataCamera.cpp:10)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBCamera>() {
     static const SColumnInfo cols[] = {
@@ -75,12 +133,144 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBCamera>() {
     return cols;
 }
 
+// CDBDifficulty  (from DataDifficulty.cpp:31)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBDifficulty>() {
+    static const SColumnInfo cols[] = {
+        { "AIAPCoeff",               2, offsetof(NDb::CDBDifficulty, fAPCoeff), 0, nullptr },  // float
+        { "AIVPCoeff",               2, offsetof(NDb::CDBDifficulty, fVPCoeff), 0, nullptr },  // float
+        { "DeathCoeff",              2, offsetof(NDb::CDBDifficulty, fDeathCoeff), 0, nullptr },  // float
+        { "AIUnitsLevel",            0, offsetof(NDb::CDBDifficulty, nAIUnitsLevel), 0, nullptr },  // int
+        { "NeedCarryOutUnconscious", 1, offsetof(NDb::CDBDifficulty, bNeedCarryOutUnconscious), 0, nullptr },  // bool
+        { "UserName",                3, offsetof(NDb::CDBDifficulty, szUserName), 0, nullptr },  // string
+        { "HealOnRestCoeff",         2, offsetof(NDb::CDBDifficulty, fHealOnRestCoeff), 0, nullptr },  // float
+        { "HealOnLeaveZone",         1, offsetof(NDb::CDBDifficulty, bHealOnLeaveZone), 0, nullptr },  // bool
+        { "HealOnLeaveZoneCoeff",    2, offsetof(NDb::CDBDifficulty, fHealOnLeaveZoneCoeff), 0, nullptr },  // float
+        { "BandageOnLeaveZone",      1, offsetof(NDb::CDBDifficulty, bBandageOnLeaveZone), 0, nullptr },  // bool
+        { "BandageOnLeaveZoneCoeff", 2, offsetof(NDb::CDBDifficulty, fBandageOnLeaveZoneCoeff), 0, nullptr },  // float
+        { "REDifficulty",            0, offsetof(NDb::CDBDifficulty, nREDifficulty), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CString  (from DataFormat.cpp:175)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CString>() {
+    static const SColumnInfo cols[] = {
+        { "String", 4, offsetof(NDb::CString, szStr), 0, nullptr },  // wstring
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CAnimation  (from DataFormat.cpp:202)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CAnimation>() {
+    static const SColumnInfo cols[] = {
+        { "SkeletonID", 5, offsetof(NDb::CAnimation, pSkeleton), 0, "CSkeleton" },  // ref
+        { "Speed",      2, offsetof(NDb::CAnimation, fSpeed), 0, nullptr },  // float
+        { "Params",     3, offsetof(NDb::CAnimation, szParams), 0, nullptr },  // string
+        { "Time1",      0, offsetof(NDb::CAnimation, nTime1), 0, nullptr },  // int
+        { "StepTime1",  0, offsetof(NDb::CAnimation, nStepTime1), 0, nullptr },  // int
+        { "StepTime2",  0, offsetof(NDb::CAnimation, nStepTime2), 0, nullptr },  // int
+        { "RndWeight",  2, offsetof(NDb::CAnimation, fRndWeight), 0, nullptr },  // float
+        { "Angle",      0, offsetof(NDb::CAnimation, nAngle), 0, nullptr },  // int
+        { "FallHeight", 2, offsetof(NDb::CAnimation, fFallHeight), 0, nullptr },  // float
+        { "SideID",     5, offsetof(NDb::CAnimation, pSide), 0, "CSide" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CSkeleton  (from DataFormat.cpp:477)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CSkeleton>() {
     static const SColumnInfo cols[] = {
         { "AIMeshLie",    5, offsetof(NDb::CSkeleton, pAIMeshLie), 0, "CAIGeometry" },  // ref
         { "AIMeshCrouch", 5, offsetof(NDb::CSkeleton, pAIMeshCrouch), 0, "CAIGeometry" },  // ref
         { "AIMeshStay",   5, offsetof(NDb::CSkeleton, pAIMeshStay), 0, "CAIGeometry" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRndModel  (from DataFormat.cpp:532)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRndModel>() {
+    static const SColumnInfo cols[] = {
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRndConstructionPart  (from DataFormat.cpp:614)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRndConstructionPart>() {
+    static const SColumnInfo cols[] = {
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CEffect  (from DataFormat.cpp:714)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CEffect>() {
+    static const SColumnInfo cols[] = {
+        { "TemplateID", 5, offsetof(NDb::CEffect, pTemplate), 0, "CTEffect" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CParticleInstance  (from DataFormat.cpp:748)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CParticleInstance>() {
+    static const SColumnInfo cols[] = {
+        { "EffectID",         5, offsetof(NDb::CParticleInstance, pEffect), 0, "CEffect" },  // ref
+        { "ParticleID",       5, offsetof(NDb::CParticleInstance, pParticle), 0, "CParticle" },  // ref
+        { "PositionX",        2, offsetof(NDb::CParticleInstance, position), offsetof(CVec3, x), nullptr },  // float
+        { "PositionY",        2, offsetof(NDb::CParticleInstance, position), offsetof(CVec3, y), nullptr },  // float
+        { "PositionZ",        2, offsetof(NDb::CParticleInstance, position), offsetof(CVec3, z), nullptr },  // float
+        { "Scale",            2, offsetof(NDb::CParticleInstance, fScale), 0, nullptr },  // float
+        { "Speed",            2, offsetof(NDb::CParticleInstance, fSpeed), 0, nullptr },  // float
+        { "CycleCount",       0, offsetof(NDb::CParticleInstance, nCycleCount), 0, nullptr },  // int
+        { "IsCrown",          1, offsetof(NDb::CParticleInstance, bIsCrown), 0, nullptr },  // bool
+        { "CastShadow",       1, offsetof(NDb::CParticleInstance, bDoesCastShadow), 0, nullptr },  // bool
+        { "PivotX",           2, offsetof(NDb::CParticleInstance, pivot), offsetof(CVec2, x), nullptr },  // float
+        { "PivotY",           2, offsetof(NDb::CParticleInstance, pivot), offsetof(CVec2, y), nullptr },  // float
+        { "GlueToEffectBone", 0, offsetof(NDb::CParticleInstance, nGlueToBone), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CParticle  (from DataFormat.cpp:823)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CParticle>() {
+    static const SColumnInfo cols[] = {
+        { "RPGArmorID",   5, offsetof(NDb::CParticle, pRPGArmor), 0, "CRPGArmor" },  // ref
+        { "AIGeometryID", 5, offsetof(NDb::CParticle, pAIGeometry), 0, "CAIGeometry" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CLightInstance  (from DataFormat.cpp:848)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CLightInstance>() {
+    static const SColumnInfo cols[] = {
+        { "EffectID",         5, offsetof(NDb::CLightInstance, pEffect), 0, "CEffect" },  // ref
+        { "LightID",          5, offsetof(NDb::CLightInstance, pLight), 0, "CAnimLight" },  // ref
+        { "PositionX",        2, offsetof(NDb::CLightInstance, position), offsetof(CVec3, x), nullptr },  // float
+        { "PositionY",        2, offsetof(NDb::CLightInstance, position), offsetof(CVec3, y), nullptr },  // float
+        { "PositionZ",        2, offsetof(NDb::CLightInstance, position), offsetof(CVec3, z), nullptr },  // float
+        { "Scale",            2, offsetof(NDb::CLightInstance, fScale), 0, nullptr },  // float
+        { "Speed",            2, offsetof(NDb::CLightInstance, fSpeed), 0, nullptr },  // float
+        { "CycleCount",       0, offsetof(NDb::CLightInstance, nCycleCount), 0, nullptr },  // int
+        { "GlueToEffectBone", 0, offsetof(NDb::CLightInstance, nGlueToBone), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CTexture  (from DataFormat.cpp:905)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CTexture>() {
+    static const SColumnInfo cols[] = {
+        { "Width",       0, offsetof(NDb::CTexture, nWidth), 0, nullptr },  // int
+        { "Height",      0, offsetof(NDb::CTexture, nHeight), 0, nullptr },  // int
+        { "BumpGain",    2, offsetof(NDb::CTexture, fGain), 0, nullptr },  // float
+        { "InstantLoad", 1, offsetof(NDb::CTexture, bInstantLoad), 0, nullptr },  // bool
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -104,6 +294,34 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CCubeTexture>() {
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CBRDF>() {
     static const SColumnInfo cols[] = {
         { "fake", 2, offsetof(NDb::CBRDF, fFake), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CMaterial  (from DataFormat.cpp:955)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CMaterial>() {
+    static const SColumnInfo cols[] = {
+        { "BRDFID",      5, offsetof(NDb::CMaterial, pBRDF), 0, "CBRDF" },  // ref
+        { "TextureID",   5, offsetof(NDb::CMaterial, pTexture), 0, "CTexture" },  // ref
+        { "BumpID",      5, offsetof(NDb::CMaterial, pBump), 0, "CTexture" },  // ref
+        { "GlossID",     5, offsetof(NDb::CMaterial, pGloss), 0, "CTexture" },  // ref
+        { "MirrorID",    5, offsetof(NDb::CMaterial, pMirror), 0, "CTexture" },  // ref
+        { "SpecFactor",  2, offsetof(NDb::CMaterial, fSpecFactor), 0, nullptr },  // float
+        { "MetalMirror", 2, offsetof(NDb::CMaterial, fMetalMirror), 0, nullptr },  // float
+        { "DielMirror",  2, offsetof(NDb::CMaterial, fDielMirror), 0, nullptr },  // float
+        { "CastShadow",  1, offsetof(NDb::CMaterial, bCastShadow), 0, nullptr },  // bool
+        { "TemplateID",  5, offsetof(NDb::CMaterial, pTemplate), 0, "CTMaterial" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CAIGeometry  (from DataFormat.cpp:1075)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CAIGeometry>() {
+    static const SColumnInfo cols[] = {
+        { "Volume",    2, offsetof(NDb::CAIGeometry, fVolume), 0, nullptr },  // float
+        { "SolidPart", 2, offsetof(NDb::CAIGeometry, fSolidPart), 0, nullptr },  // float
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -135,11 +353,49 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CTypeface>() {
     return cols;
 }
 
+// CTerrainTile  (from DataFormat.cpp:1139)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CTerrainTile>() {
+    static const SColumnInfo cols[] = {
+        { "Priority",        0, offsetof(NDb::CTerrainTile, nPriority), 0, nullptr },  // int
+        { "MaskVariants",    0, offsetof(NDb::CTerrainTile, nMaskVariants), 0, nullptr },  // int
+        { "TextureVariants", 0, offsetof(NDb::CTerrainTile, nTextureVariants), 0, nullptr },  // int
+        { "BumpID",          5, offsetof(NDb::CTerrainTile, pBump), 0, "CTexture" },  // ref
+        { "MaskID",          5, offsetof(NDb::CTerrainTile, pMask), 0, "CTexture" },  // ref
+        { "TextureID",       5, offsetof(NDb::CTerrainTile, pTexture), 0, "CTexture" },  // ref
+        { "RPGArmorID",      5, offsetof(NDb::CTerrainTile, pArmor), 0, "CRPGArmor" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CSpot  (from DataFormat.cpp:1155)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CSpot>() {
     static const SColumnInfo cols[] = {
         { "MaterialID", 5, offsetof(NDb::CSpot, pMaterial), 0, "CTMaterial" },  // ref
         { "RPGArmorID", 5, offsetof(NDb::CSpot, pArmor), 0, "CRPGArmor" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CAmbientLight  (from DataFormat.cpp:1163)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CAmbientLight>() {
+    static const SColumnInfo cols[] = {
+        { "Pitch",             2, offsetof(NDb::CAmbientLight, fPitch), 0, nullptr },  // float
+        { "Yaw",               2, offsetof(NDb::CAmbientLight, fYaw), 0, nullptr },  // float
+        { "FogDistance",       2, offsetof(NDb::CAmbientLight, fFogDistance), 0, nullptr },  // float
+        { "VapourHeight",      2, offsetof(NDb::CAmbientLight, fVapourHeight), 0, nullptr },  // float
+        { "VapourDensity",     2, offsetof(NDb::CAmbientLight, fVapourDensity), 0, nullptr },  // float
+        { "VapourNoiseParam",  2, offsetof(NDb::CAmbientLight, fVapourNoiseParam), 0, nullptr },  // float
+        { "VapourSpeed",       2, offsetof(NDb::CAmbientLight, fVapourSpeed), 0, nullptr },  // float
+        { "VapourSwitchTime",  2, offsetof(NDb::CAmbientLight, fVapourSwitchTime), 0, nullptr },  // float
+        { "FogStartDistance",  2, offsetof(NDb::CAmbientLight, fFogStartDistance), 0, nullptr },  // float
+        { "VapourStartHeight", 2, offsetof(NDb::CAmbientLight, fVapourStartHeight), 0, nullptr },  // float
+        { "BlurStrength",      2, offsetof(NDb::CAmbientLight, fBlurStrength), 0, nullptr },  // float
+        { "SkyID",             5, offsetof(NDb::CAmbientLight, pSky), 0, "CCubeTexture" },  // ref
+        { "UseInGame",         1, offsetof(NDb::CAmbientLight, bInGameUse), 0, nullptr },  // bool
+        { "GForce2LightID",    5, offsetof(NDb::CAmbientLight, pGF2Light), 0, "CTAmbientLight" },  // ref
+        { "TemplateID",        5, offsetof(NDb::CAmbientLight, pTemplate), 0, "CTAmbientLight" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -157,6 +413,14 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CSound>() {
     return cols;
 }
 
+// CMusic  (from DataFormat.cpp:1261)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CMusic>() {
+    static const SColumnInfo cols[] = {
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CDebris  (from DataFormat.cpp:1308)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDebris>() {
     static const SColumnInfo cols[] = {
@@ -168,10 +432,218 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDebris>() {
     return cols;
 }
 
+// CRndContainerModel  (from DataFormat.cpp:1326)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRndContainerModel>() {
+    static const SColumnInfo cols[] = {
+        { "ModelID",            5, offsetof(NDb::CRndContainerModel, pModel), 0, "CTRndModel" },  // ref
+        { "ParticleID",         5, offsetof(NDb::CRndContainerModel, pEffect), 0, "CTEffect" },  // ref
+        { "ParticlePosX",       2, offsetof(NDb::CRndContainerModel, ptEffectPos), offsetof(CVec3, x), nullptr },  // float
+        { "ParticlePosY",       2, offsetof(NDb::CRndContainerModel, ptEffectPos), offsetof(CVec3, y), nullptr },  // float
+        { "ParticlePosZ",       2, offsetof(NDb::CRndContainerModel, ptEffectPos), offsetof(CVec3, z), nullptr },  // float
+        { "PLightPosX",         2, offsetof(NDb::CRndContainerModel, ptPLightPos), offsetof(CVec3, x), nullptr },  // float
+        { "PLightPosY",         2, offsetof(NDb::CRndContainerModel, ptPLightPos), offsetof(CVec3, y), nullptr },  // float
+        { "PLightPosZ",         2, offsetof(NDb::CRndContainerModel, ptPLightPos), offsetof(CVec3, z), nullptr },  // float
+        { "SLightPosX",         2, offsetof(NDb::CRndContainerModel, ptSLightPos), offsetof(CVec3, x), nullptr },  // float
+        { "SLightPosY",         2, offsetof(NDb::CRndContainerModel, ptSLightPos), offsetof(CVec3, y), nullptr },  // float
+        { "SLightPosZ",         2, offsetof(NDb::CRndContainerModel, ptSLightPos), offsetof(CVec3, z), nullptr },  // float
+        { "SLightDirX",         2, offsetof(NDb::CRndContainerModel, ptSLightDir), offsetof(CVec3, x), nullptr },  // float
+        { "SLightDirY",         2, offsetof(NDb::CRndContainerModel, ptSLightDir), offsetof(CVec3, y), nullptr },  // float
+        { "SLightDirZ",         2, offsetof(NDb::CRndContainerModel, ptSLightDir), offsetof(CVec3, z), nullptr },  // float
+        { "PLightRadius",       2, offsetof(NDb::CRndContainerModel, fPLightRadius), 0, nullptr },  // float
+        { "PLightFlareRadius",  2, offsetof(NDb::CRndContainerModel, fPFlareRadius), 0, nullptr },  // float
+        { "PLightFlareTexture", 5, offsetof(NDb::CRndContainerModel, pPFlareTexture), 0, "CTexture" },  // ref
+        { "SLightMaskID",       5, offsetof(NDb::CRndContainerModel, pSLightMask), 0, "CTexture" },  // ref
+        { "SLightRadius",       2, offsetof(NDb::CRndContainerModel, fSLightRadius), 0, nullptr },  // float
+        { "SoundID",            5, offsetof(NDb::CRndContainerModel, pSound), 0, "CTSound" },  // ref
+        { "DestructionSoundID", 5, offsetof(NDb::CRndContainerModel, pDestroySound), 0, "CTSound" },  // ref
+        { "SoundEffectID",      5, offsetof(NDb::CRndContainerModel, pSoundEffect), 0, "CSoundEffect" },  // ref
+        { "SoundPosX",          2, offsetof(NDb::CRndContainerModel, ptSoundPos), offsetof(CVec3, x), nullptr },  // float
+        { "SoundPosY",          2, offsetof(NDb::CRndContainerModel, ptSoundPos), offsetof(CVec3, y), nullptr },  // float
+        { "SoundPosZ",          2, offsetof(NDb::CRndContainerModel, ptSoundPos), offsetof(CVec3, z), nullptr },  // float
+        { "PLightFlarePosX",    2, offsetof(NDb::CRndContainerModel, ptPLightFlarePos), offsetof(CVec3, x), nullptr },  // float
+        { "PLightFlarePosY",    2, offsetof(NDb::CRndContainerModel, ptPLightFlarePos), offsetof(CVec3, y), nullptr },  // float
+        { "PLightFlarePosZ",    2, offsetof(NDb::CRndContainerModel, ptPLightFlarePos), offsetof(CVec3, z), nullptr },  // float
+        { "SoundAvgInterval",   2, offsetof(NDb::CRndContainerModel, fSoundAvgInterval), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDoor  (from DataFormat.cpp:1415)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDoor>() {
+    static const SColumnInfo cols[] = {
+        { "ObjectID",     5, offsetof(NDb::CDoor, pObject), 0, "CTRndObject" },  // ref
+        { "OpenSoundID",  5, offsetof(NDb::CDoor, pOpenSound), 0, "CTSound" },  // ref
+        { "CloseSoundID", 5, offsetof(NDb::CDoor, pCloseSound), 0, "CTSound" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CGun  (from DataFormat.cpp:1427)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CGun>() {
+    static const SColumnInfo cols[] = {
+        { "ObjectID",    5, offsetof(NDb::CGun, pObject), 0, "CTRndObject" },  // ref
+        { "RPGWeaponID", 5, offsetof(NDb::CGun, pWeapon), 0, "CRPGWeapon" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CPassageObject  (from DataFormat.cpp:1438)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CPassageObject>() {
+    static const SColumnInfo cols[] = {
+        { "UseSoundID", 5, offsetof(NDb::CPassageObject, pUseSound), 0, "CSound" },  // ref
+        { "ObjectID",   5, offsetof(NDb::CPassageObject, pObject), 0, "CTRndObject" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CTRndObject  (from DataFormat.cpp:1449)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CTRndObject>() {
+    static const SColumnInfo cols[] = {
+        { "PlacableID", 5, offsetof(NDb::CTRndObject, pPlacable), 0, "CPlacableObject" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRndObject  (from DataFormat.cpp:1465)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRndObject>() {
+    static const SColumnInfo cols[] = {
+        { "Model0",           5, (int)((char*)&((NDb::CRndObject*)1)->pModels[0] - (char*)1), 0, "CRndContainerModel" },  // ref
+        { "Model1",           5, (int)((char*)&((NDb::CRndObject*)1)->pModels[1] - (char*)1), 0, "CRndContainerModel" },  // ref
+        { "Model2",           5, (int)((char*)&((NDb::CRndObject*)1)->pModels[2] - (char*)1), 0, "CRndContainerModel" },  // ref
+        { "Model3",           5, (int)((char*)&((NDb::CRndObject*)1)->pModels[3] - (char*)1), 0, "CRndContainerModel" },  // ref
+        { "Model4",           5, (int)((char*)&((NDb::CRndObject*)1)->pModels[4] - (char*)1), 0, "CRndContainerModel" },  // ref
+        { "DebrisMaterialID", 5, offsetof(NDb::CRndObject, pDebrisMaterial), 0, "CDebrisMaterial" },  // ref
+        { "Targetable",       1, offsetof(NDb::CRndObject, bTargetable), 0, nullptr },  // bool
+        { "IsDeployPoint",    1, offsetof(NDb::CRndObject, bIsDeploySpot), 0, nullptr },  // bool
+        { "TemplateID",       5, offsetof(NDb::CRndObject, pTemplate), 0, "CTRndObject" },  // ref
+        { "KeepDecals",       1, offsetof(NDb::CRndObject, bKeepDecals), 0, nullptr },  // bool
+        { "ChildID",          5, offsetof(NDb::CRndObject, pChild), 0, "CTRndObject" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CGrass  (from DataFormat.cpp:1596)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CGrass>() {
+    static const SColumnInfo cols[] = {
+        { "TextureID",      5, offsetof(NDb::CGrass, pTexture), 0, "CTexture" },  // ref
+        { "ScaleX",         2, offsetof(NDb::CGrass, ptScale), offsetof(CVec2, x), nullptr },  // float
+        { "ScaleY",         2, offsetof(NDb::CGrass, ptScale), offsetof(CVec2, y), nullptr },  // float
+        { "PivotX",         2, offsetof(NDb::CGrass, ptPivot), offsetof(CVec2, x), nullptr },  // float
+        { "PivotY",         2, offsetof(NDb::CGrass, ptPivot), offsetof(CVec2, y), nullptr },  // float
+        { "SpotMaterialID", 5, offsetof(NDb::CGrass, pSpotMaterial), 0, "CTMaterial" },  // ref
+        { "SpotScale",      2, offsetof(NDb::CGrass, fSpotScale), 0, nullptr },  // float
+        { "SideSize",       0, offsetof(NDb::CGrass, nSideSize), 0, nullptr },  // int
+        { "ScaleRange",     2, offsetof(NDb::CGrass, fScaleRange), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CSoundVariant  (from DataFormat.cpp:1612)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CSoundVariant>() {
+    static const SColumnInfo cols[] = {
+        { "SoundID",    5, offsetof(NDb::CSoundVariant, pSound), 0, "CSound" },  // ref
+        { "TemplateID", 5, offsetof(NDb::CSoundVariant, pTemplate), 0, "CTSound" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CHead  (from DataFormat.cpp:1636)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CHead>() {
     static const SColumnInfo cols[] = {
         { "Material0", 5, offsetof(NDb::CHead, pMaterial), 0, "CTMaterial" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CComplexHead  (from DataFormat.cpp:1662)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CComplexHead>() {
+    static const SColumnInfo cols[] = {
+        { "HeadID",    5, offsetof(NDb::CComplexHead, pHead), 0, "CHead" },  // ref
+        { "Hair",      5, offsetof(NDb::CComplexHead, pHair), 0, "CTRndModel" },  // ref
+        { "HairInCap", 5, offsetof(NDb::CComplexHead, pHairInCap), 0, "CTRndModel" },  // ref
+        { "Mesh0",     5, (int)((char*)&((NDb::CComplexHead*)1)->pMeshes[0] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Mesh1",     5, (int)((char*)&((NDb::CComplexHead*)1)->pMeshes[1] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Mesh2",     5, (int)((char*)&((NDb::CComplexHead*)1)->pMeshes[2] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Mesh3",     5, (int)((char*)&((NDb::CComplexHead*)1)->pMeshes[3] - (char*)1), 0, "CTRndModel" },  // ref
+        { "IFMesh0",   5, (int)((char*)&((NDb::CComplexHead*)1)->pIFMeshes[0] - (char*)1), 0, "CTRndModel" },  // ref
+        { "IFMesh1",   5, (int)((char*)&((NDb::CComplexHead*)1)->pIFMeshes[1] - (char*)1), 0, "CTRndModel" },  // ref
+        { "IFMesh2",   5, (int)((char*)&((NDb::CComplexHead*)1)->pIFMeshes[2] - (char*)1), 0, "CTRndModel" },  // ref
+        { "IFMesh3",   5, (int)((char*)&((NDb::CComplexHead*)1)->pIFMeshes[3] - (char*)1), 0, "CTRndModel" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CSoundInstance  (from DataFormat.cpp:1692)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CSoundInstance>() {
+    static const SColumnInfo cols[] = {
+        { "SoundID",          5, offsetof(NDb::CSoundInstance, pSound), 0, "CTSound" },  // ref
+        { "StartTime",        0, offsetof(NDb::CSoundInstance, nStartTime), 0, nullptr },  // int
+        { "CycleCount",       0, offsetof(NDb::CSoundInstance, nCycleCount), 0, nullptr },  // int
+        { "FadeIn",           1, offsetof(NDb::CSoundInstance, bFadeIn), 0, nullptr },  // bool
+        { "FadeOut",          1, offsetof(NDb::CSoundInstance, bFadeOut), 0, nullptr },  // bool
+        { "FadeSamples",      0, offsetof(NDb::CSoundInstance, nFadeSamples), 0, nullptr },  // int
+        { "Volume",           0, offsetof(NDb::CSoundInstance, nVolume), 0, nullptr },  // int
+        { "SoundAvgInterval", 2, offsetof(NDb::CSoundInstance, fSoundAvgInterval), 0, nullptr },  // float
+        { "EffectID",         5, offsetof(NDb::CSoundInstance, pEffect), 0, "CSoundEffect" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CTranslatedString  (from DataFormat.cpp:1735)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CTranslatedString>() {
+    static const SColumnInfo cols[] = {
+        { "String", 4, offsetof(NDb::CTranslatedString, szStr), 0, nullptr },  // wstring
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CUIControl  (from DataInterface.cpp:12)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CUIControl>() {
+    static const SColumnInfo cols[] = {
+        { "IDText",              3, offsetof(NDb::CUIControl, szID), 0, nullptr },  // string
+        { "Depth",               0, offsetof(NDb::CUIControl, nDepth), 0, nullptr },  // int
+        { "Color",               0, offsetof(NDb::CUIControl, nColor), 0, nullptr },  // int
+        { "Left",                0, offsetof(NDb::CUIControl, rect), offsetof(CTRect<int>, left), nullptr },  // int
+        { "Top",                 0, offsetof(NDb::CUIControl, rect), offsetof(CTRect<int>, top), nullptr },  // int
+        { "Right",               0, offsetof(NDb::CUIControl, rect), offsetof(CTRect<int>, right), nullptr },  // int
+        { "Bottom",              0, offsetof(NDb::CUIControl, rect), offsetof(CTRect<int>, bottom), nullptr },  // int
+        { "Sound0",              5, (int)((char*)&((NDb::CUIControl*)1)->pSounds[0] - (char*)1), 0, "CSound" },  // ref
+        { "Sound1",              5, (int)((char*)&((NDb::CUIControl*)1)->pSounds[1] - (char*)1), 0, "CSound" },  // ref
+        { "Sound2",              5, (int)((char*)&((NDb::CUIControl*)1)->pSounds[2] - (char*)1), 0, "CSound" },  // ref
+        { "Sound3",              5, (int)((char*)&((NDb::CUIControl*)1)->pSounds[3] - (char*)1), 0, "CSound" },  // ref
+        { "Sound4",              5, (int)((char*)&((NDb::CUIControl*)1)->pSounds[4] - (char*)1), 0, "CSound" },  // ref
+        { "Model0",              5, (int)((char*)&((NDb::CUIControl*)1)->pModels[0] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Model1",              5, (int)((char*)&((NDb::CUIControl*)1)->pModels[1] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Model2",              5, (int)((char*)&((NDb::CUIControl*)1)->pModels[2] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Model3",              5, (int)((char*)&((NDb::CUIControl*)1)->pModels[3] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Model4",              5, (int)((char*)&((NDb::CUIControl*)1)->pModels[4] - (char*)1), 0, "CTRndModel" },  // ref
+        { "Texture0",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[0] - (char*)1), 0, "CUITexture" },  // ref
+        { "Texture1",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[1] - (char*)1), 0, "CUITexture" },  // ref
+        { "Texture2",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[2] - (char*)1), 0, "CUITexture" },  // ref
+        { "Texture3",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[3] - (char*)1), 0, "CUITexture" },  // ref
+        { "Texture4",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[4] - (char*)1), 0, "CUITexture" },  // ref
+        { "Texture5",            5, (int)((char*)&((NDb::CUIControl*)1)->pTextures[5] - (char*)1), 0, "CUITexture" },  // ref
+        { "StringID",            5, offsetof(NDb::CUIControl, pString), 0, "CString" },  // ref
+        { "UIContainerID",       5, offsetof(NDb::CUIControl, pContainer), 0, "CUIContainer" },  // ref
+        { "NestedUIContainerID", 5, offsetof(NDb::CUIControl, pNestedUIContainer), 0, "CUIContainer" },  // ref
+        { "TooltipID",           5, offsetof(NDb::CUIControl, pToolTip), 0, "CString" },  // ref
+        { "Visible",             1, offsetof(NDb::CUIControl, bVisible), 0, nullptr },  // bool
+        { "Transparent",         1, offsetof(NDb::CUIControl, bTransparent), 0, nullptr },  // bool
+        { "Topmost",             1, offsetof(NDb::CUIControl, bTopmost), 0, nullptr },  // bool
+        { "DefaultWindow",       1, offsetof(NDb::CUIControl, bDefault), 0, nullptr },  // bool
+        { "Bottommost",          1, offsetof(NDb::CUIControl, bBottommost), 0, nullptr },  // bool
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -198,11 +670,96 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CGlobalMap>() {
     return cols;
 }
 
+// CChapterMap  (from DataMap.cpp:88)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CChapterMap>() {
+    static const SColumnInfo cols[] = {
+        { "Background", 5, offsetof(NDb::CChapterMap, pBackground), 0, "CUITexture" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CTemplate  (from DataMap.cpp:104)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CTemplate>() {
     static const SColumnInfo cols[] = {
         { "Width",  0, offsetof(NDb::CTemplate, nWidth), 0, nullptr },  // int
         { "Height", 0, offsetof(NDb::CTemplate, nHeight), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CTemplVariant  (from DataMap.cpp:120)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CTemplVariant>() {
+    static const SColumnInfo cols[] = {
+        { "Grid",         1, offsetof(NDb::CTemplVariant, bGrid), 0, nullptr },  // bool
+        { "TemplateID",   5, offsetof(NDb::CTemplVariant, pTemplate), 0, "CTemplate" },  // ref
+        { "DefaultLight", 5, offsetof(NDb::CTemplVariant, pLight), 0, "CTAmbientLight" },  // ref
+        { "ColorMap",     5, offsetof(NDb::CTemplVariant, pColorMap), 0, "CTexture" },  // ref
+        { "ScriptID",     5, offsetof(NDb::CTemplVariant, pScript), 0, "CScript" },  // ref
+        { "Border",       0, offsetof(NDb::CTemplVariant, nBorder), 0, nullptr },  // int
+        { "AmbientMusic", 5, offsetof(NDb::CTemplVariant, pAmbientMusic), 0, "CMusic" },  // ref
+        { "CombatMusic",  5, offsetof(NDb::CTemplVariant, pCombatMusic), 0, "CMusic" },  // ref
+        { "DiplomacyID",  5, offsetof(NDb::CTemplVariant, pDiplomacy), 0, "CDBDiplomacy" },  // ref
+        { "ShowTerrain",  1, offsetof(NDb::CTemplVariant, bShowTerrain), 0, nullptr },  // bool
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRectangle  (from DataMap.cpp:201)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRectangle>() {
+    static const SColumnInfo cols[] = {
+        { "VariantID",    5, offsetof(NDb::CRectangle, pVariant), 0, "CTemplVariant" },  // ref
+        { "CenterX",      2, offsetof(NDb::CRectangle, ptCenter), offsetof(CVec2, x), nullptr },  // float
+        { "CenterY",      2, offsetof(NDb::CRectangle, ptCenter), offsetof(CVec2, y), nullptr },  // float
+        { "Width",        2, offsetof(NDb::CRectangle, fWidth), 0, nullptr },  // float
+        { "Height",       2, offsetof(NDb::CRectangle, fHeight), 0, nullptr },  // float
+        { "TemplateLink", 5, offsetof(NDb::CRectangle, pTemplate), 0, "CTemplate" },  // ref
+        { "Rotation",     2, offsetof(NDb::CRectangle, fRotation), 0, nullptr },  // float
+        { "Floor",        0, offsetof(NDb::CRectangle, nFloor), 0, nullptr },  // int
+        { "DeltaZ",       2, offsetof(NDb::CRectangle, fDZ), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CFinalElement  (from DataMap.cpp:232)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CFinalElement>() {
+    static const SColumnInfo cols[] = {
+        { "ModelID",           5, offsetof(NDb::CFinalElement, pObject), 0, "CPlacableObject" },  // ref
+        { "VariantID",         5, offsetof(NDb::CFinalElement, pVariant), 0, "CTemplVariant" },  // ref
+        { "Rotation",          2, offsetof(NDb::CFinalElement, fRotation), 0, nullptr },  // float
+        { "PosX",              2, offsetof(NDb::CFinalElement, ptPos), offsetof(CVec2, x), nullptr },  // float
+        { "PosY",              2, offsetof(NDb::CFinalElement, ptPos), offsetof(CVec2, y), nullptr },  // float
+        { "Floor",             0, offsetof(NDb::CFinalElement, nFloor), 0, nullptr },  // int
+        { "DeltaZ",            2, offsetof(NDb::CFinalElement, fDZ), 0, nullptr },  // float
+        { "Lightmap",          1, offsetof(NDb::CFinalElement, bLightmap), 0, nullptr },  // bool
+        { "ScaleX",            2, offsetof(NDb::CFinalElement, ptScale), offsetof(CVec3, x), nullptr },  // float
+        { "ScaleY",            2, offsetof(NDb::CFinalElement, ptScale), offsetof(CVec3, y), nullptr },  // float
+        { "ScaleZ",            2, offsetof(NDb::CFinalElement, ptScale), offsetof(CVec3, z), nullptr },  // float
+        { "OpenObject",        1, offsetof(NDb::CFinalElement, bOpen), 0, nullptr },  // bool
+        { "Power",             2, offsetof(NDb::CFinalElement, fPower), 0, nullptr },  // float
+        { "Radius",            2, offsetof(NDb::CFinalElement, fRadius), 0, nullptr },  // float
+        { "PassageZoneID",     0, offsetof(NDb::CFinalElement, nPassageZoneID), 0, nullptr },  // int
+        { "PassageObjectID",   0, offsetof(NDb::CFinalElement, nPassageObjectID), 0, nullptr },  // int
+        { "APRadius",          0, offsetof(NDb::CFinalElement, nAPRadius), 0, nullptr },  // int
+        { "Name",              3, offsetof(NDb::CFinalElement, szName), 0, nullptr },  // string
+        { "LightPosX",         2, offsetof(NDb::CFinalElement, ptLightPos), offsetof(CVec3, x), nullptr },  // float
+        { "LightPosY",         2, offsetof(NDb::CFinalElement, ptLightPos), offsetof(CVec3, y), nullptr },  // float
+        { "LightPosZ",         2, offsetof(NDb::CFinalElement, ptLightPos), offsetof(CVec3, z), nullptr },  // float
+        { "LightRadius",       2, offsetof(NDb::CFinalElement, fLightRadius), 0, nullptr },  // float
+        { "LightFlareRadius",  2, offsetof(NDb::CFinalElement, fFlareRadius), 0, nullptr },  // float
+        { "LightFlareTexture", 5, offsetof(NDb::CFinalElement, pFlareTexture), 0, "CTexture" },  // ref
+        { "LightParam",        3, offsetof(NDb::CFinalElement, szLightParams), 0, nullptr },  // string
+        { "FlarePosX",         2, offsetof(NDb::CFinalElement, ptFlarePos), offsetof(CVec3, x), nullptr },  // float
+        { "FlarePosY",         2, offsetof(NDb::CFinalElement, ptFlarePos), offsetof(CVec3, y), nullptr },  // float
+        { "FlarePosZ",         2, offsetof(NDb::CFinalElement, ptFlarePos), offsetof(CVec3, z), nullptr },  // float
+        { "ObjectPhase",       0, offsetof(NDb::CFinalElement, nObjectPhase), 0, nullptr },  // int
+        { "ObjStageDelta",     0, offsetof(NDb::CFinalElement, nObjStageDelta), 0, nullptr },  // int
+        { "ObjRadius",         2, offsetof(NDb::CFinalElement, fObjRadius), 0, nullptr },  // float
+        { "Grenade",           5, offsetof(NDb::CFinalElement, pGrenade), 0, "CRPGGrenade" },  // ref
+        { "Armed",             1, offsetof(NDb::CFinalElement, bArmed), 0, nullptr },  // bool
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -219,6 +776,30 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CContainer>() {
         { "Floor",     0, offsetof(NDb::CContainer, nFloor), 0, nullptr },  // int
         { "DeltaZ",    2, offsetof(NDb::CContainer, fDZ), 0, nullptr },  // float
         { "RoomID",    0, offsetof(NDb::CContainer, nRoomID), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CUnit  (from DataMap.cpp:322)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CUnit>() {
+    static const SColumnInfo cols[] = {
+        { "VariantID",         5, offsetof(NDb::CUnit, pVariant), 0, "CTemplVariant" },  // ref
+        { "Rotation",          2, offsetof(NDb::CUnit, fRotation), 0, nullptr },  // float
+        { "MonsterID",         5, offsetof(NDb::CUnit, pMonster), 0, "CRPGPers" },  // ref
+        { "PosX",              2, offsetof(NDb::CUnit, ptPos), offsetof(CTPoint<int>, x), nullptr },  // float
+        { "PosY",              2, offsetof(NDb::CUnit, ptPos), offsetof(CTPoint<int>, y), nullptr },  // float
+        { "Floor",             0, offsetof(NDb::CUnit, nFloor), 0, nullptr },  // int
+        { "ClueSlot",          1, offsetof(NDb::CUnit, bClueSlot), 0, nullptr },  // bool
+        { "ClueInventorySlot", 1, offsetof(NDb::CUnit, bClueInventorySlot), 0, nullptr },  // bool
+        { "Player",            0, offsetof(NDb::CUnit, nPlayer), 0, nullptr },  // int
+        { "Diplomacy",         0, offsetof(NDb::CUnit, nDiplomacy), 0, nullptr },  // int
+        { "RelativeLevel",     0, offsetof(NDb::CUnit, nRelativeLevel), 0, nullptr },  // int
+        { "Group",             5, offsetof(NDb::CUnit, pGroup), 0, "CUnitGroup" },  // ref
+        { "Name",              3, offsetof(NDb::CUnit, szName), 0, nullptr },  // string
+        { "RoamingRadius",     0, offsetof(NDb::CUnit, nRoamingRadius), 0, nullptr },  // int
+        { "FearUseToHit",      1, offsetof(NDb::CUnit, bFearUseToHit), 0, nullptr },  // bool
+        { "GuardAnimation",    5, offsetof(NDb::CUnit, pGuardAnimation), 0, "CAnimation" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -321,10 +902,95 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CAttribute>() {
     return cols;
 }
 
+// CExplosion  (from DataMap.cpp:547)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CExplosion>() {
+    static const SColumnInfo cols[] = {
+        { "Floor",     0, offsetof(NDb::CExplosion, nFloor), 0, nullptr },  // int
+        { "PosX",      2, offsetof(NDb::CExplosion, ptPos), offsetof(CVec2, x), nullptr },  // float
+        { "PosY",      2, offsetof(NDb::CExplosion, ptPos), offsetof(CVec2, y), nullptr },  // float
+        { "DeltaZ",    2, offsetof(NDb::CExplosion, fDZ), 0, nullptr },  // float
+        { "Power",     2, offsetof(NDb::CExplosion, fPower), 0, nullptr },  // float
+        { "VariantID", 5, offsetof(NDb::CExplosion, pVariant), 0, "CTemplVariant" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRndTerrainSpot  (from DataMap.cpp:606)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRndTerrainSpot>() {
+    static const SColumnInfo cols[] = {
+        { "MaterialID",  5, offsetof(NDb::CRndTerrainSpot, pSpot), 0, "CSpot" },  // ref
+        { "PosX",        2, offsetof(NDb::CRndTerrainSpot, ptPos), offsetof(CVec2, x), nullptr },  // float
+        { "PosY",        2, offsetof(NDb::CRndTerrainSpot, ptPos), offsetof(CVec2, y), nullptr },  // float
+        { "SizeX",       2, offsetof(NDb::CRndTerrainSpot, ptSize), offsetof(CVec2, x), nullptr },  // float
+        { "SizeY",       2, offsetof(NDb::CRndTerrainSpot, ptSize), offsetof(CVec2, y), nullptr },  // float
+        { "Rotation",    0, offsetof(NDb::CRndTerrainSpot, nRotation), 0, nullptr },  // int
+        { "PlacementID", 5, offsetof(NDb::CRndTerrainSpot, pVar), 0, "CTemplVariant" },  // ref
+        { "Priority",    0, offsetof(NDb::CRndTerrainSpot, nPriority), 0, nullptr },  // int
+        { "Layer",       0, offsetof(NDb::CRndTerrainSpot, nLayer), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CWaypointName  (from DataMap.cpp:681)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CWaypointName>() {
     static const SColumnInfo cols[] = {
         { "UserName", 3, offsetof(NDb::CWaypointName, szName), 0, nullptr },  // string
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CWaypoint  (from DataMap.cpp:686)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CWaypoint>() {
+    static const SColumnInfo cols[] = {
+        { "NameID",    5, offsetof(NDb::CWaypoint, pName), 0, "CWaypointName" },  // ref
+        { "VariantID", 5, offsetof(NDb::CWaypoint, pVar), 0, "CTemplVariant" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBPerk  (from DataPerk.cpp:13)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBPerk>() {
+    static const SColumnInfo cols[] = {
+        { "UserName",     3, offsetof(NDb::CDBPerk, szUserName), 0, nullptr },  // string
+        { "IDText",       3, offsetof(NDb::CDBPerk, szID), 0, nullptr },  // string
+        { "ToolTip",      5, offsetof(NDb::CDBPerk, pToolTip), 0, "CString" },  // ref
+        { "Icon",         5, offsetof(NDb::CDBPerk, pIcon), 0, "CUITexture" },  // ref
+        { "IconDisabled", 5, offsetof(NDb::CDBPerk, pIconDisabled), 0, "CUITexture" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBPerkTreeNode  (from DataPerk.cpp:29)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBPerkTreeNode>() {
+    static const SColumnInfo cols[] = {
+        { "PerkTreeID", 0, offsetof(NDb::CDBPerkTreeNode, nTreeID), 0, nullptr },  // int
+        { "PerkID",     5, offsetof(NDb::CDBPerkTreeNode, pPerk), 0, "CDBPerk" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGItem  (from DataRPG.cpp:58)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGItem>() {
+    static const SColumnInfo cols[] = {
+        { "Weight",              0, offsetof(NDb::CRPGItem, nWeight), 0, nullptr },  // int
+        { "SizeX",               2, offsetof(NDb::CRPGItem, sSize), offsetof(CTPoint<int>, x), nullptr },  // float
+        { "SizeY",               2, offsetof(NDb::CRPGItem, sSize), offsetof(CTPoint<int>, y), nullptr },  // float
+        { "TooltipID",           5, offsetof(NDb::CRPGItem, pToolTip), 0, "CString" },  // ref
+        { "ModelID",             5, offsetof(NDb::CRPGItem, pModel), 0, "CTRndModel" },  // ref
+        { "ModelActive1",        5, offsetof(NDb::CRPGItem, pModelActive), 0, "CTRndModel" },  // ref
+        { "Model1",              5, offsetof(NDb::CRPGItem, pModelInactive), 0, "CTRndModel" },  // ref
+        { "SubTypePriority",     0, offsetof(NDb::CRPGItem, nSubTypePriority), 0, nullptr },  // int
+        { "NameID",              5, offsetof(NDb::CRPGItem, pName), 0, "CString" },  // ref
+        { "DescrID",             5, offsetof(NDb::CRPGItem, pDescription), 0, "CString" },  // ref
+        { "PlacableID",          5, offsetof(NDb::CRPGItem, pPlaceObj), 0, "CPlacableObject" },  // ref
+        { "ArmorID",             5, offsetof(NDb::CRPGItem, pRPGArmor), 0, "CRPGArmor" },  // ref
+        { "DestructionEffectID", 5, offsetof(NDb::CRPGItem, pDestructionEffect), 0, "CTEffect" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -337,6 +1003,26 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGStoreItem>() {
         { "ItemID",   5, offsetof(NDb::CRPGStoreItem, pItem), 0, "CRPGItem" },  // ref
         { "SideID",   5, offsetof(NDb::CRPGStoreItem, pSide), 0, "CSide" },  // ref
         { "Quantity", 2, offsetof(NDb::CRPGStoreItem, fQuantity), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGDmgToArmor  (from DataRPG.cpp:179)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGDmgToArmor>() {
+    static const SColumnInfo cols[] = {
+        { "Glass",       0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[0] - (char*)1), 0, nullptr },  // int
+        { "Wood",        0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[1] - (char*)1), 0, nullptr },  // int
+        { "Forest",      0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[2] - (char*)1), 0, nullptr },  // int
+        { "Brick",       0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[3] - (char*)1), 0, nullptr },  // int
+        { "Stone",       0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[4] - (char*)1), 0, nullptr },  // int
+        { "Concrete",    0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[5] - (char*)1), 0, nullptr },  // int
+        { "Steel",       0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[6] - (char*)1), 0, nullptr },  // int
+        { "LightArmor",  0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[7] - (char*)1), 0, nullptr },  // int
+        { "MediumArmor", 0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[8] - (char*)1), 0, nullptr },  // int
+        { "HeavyArmor",  0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[9] - (char*)1), 0, nullptr },  // int
+        { "Leaves",      0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[10] - (char*)1), 0, nullptr },  // int
+        { "Item",        0, (int)((char*)&((NDb::CRPGDmgToArmor*)1)->armors[11] - (char*)1), 0, nullptr },  // int
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -375,10 +1061,291 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGArmor>() {
     return cols;
 }
 
+// CRPGWeaponType  (from DataRPG.cpp:227)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGWeaponType>() {
+    static const SColumnInfo cols[] = {
+        { "SkillIndex",     0, offsetof(NDb::CRPGWeaponType, nSkillIndex), 0, nullptr },  // int
+        { "MovePenalty",    2, offsetof(NDb::CRPGWeaponType, fMovePenalty), 0, nullptr },  // float
+        { "CrawlBonus",     2, offsetof(NDb::CRPGWeaponType, fCrawlBonus), 0, nullptr },  // float
+        { "CrouchBonus",    2, offsetof(NDb::CRPGWeaponType, fCrouchBonus), 0, nullptr },  // float
+        { "TwoHanded",      1, offsetof(NDb::CRPGWeaponType, bTwoHanded), 0, nullptr },  // bool
+        { "AISoundID",      5, offsetof(NDb::CRPGWeaponType, pAISound), 0, "CAISound" },  // ref
+        { "BurstAISoundID", 5, offsetof(NDb::CRPGWeaponType, pBurstAISound), 0, "CAISound" },  // ref
+        { "ID",             0, offsetof(NDb::CRPGWeaponType, nWeaponTypeID), 0, nullptr },  // int
+        { "NameID",         5, offsetof(NDb::CRPGWeaponType, pName), 0, "CString" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGAmmo  (from DataRPG.cpp:265)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGAmmo>() {
+    static const SColumnInfo cols[] = {
+        { "BulletType",             0, offsetof(NDb::CRPGAmmo, nBulletType), 0, nullptr },  // int
+        { "RangeMod",               2, offsetof(NDb::CRPGAmmo, fRangeMod), 0, nullptr },  // float
+        { "DmgMin",                 0, offsetof(NDb::CRPGAmmo, nDmgMin), 0, nullptr },  // int
+        { "DmgMax",                 0, offsetof(NDb::CRPGAmmo, nDmgMax), 0, nullptr },  // int
+        { "UnitWeight",             2, offsetof(NDb::CRPGAmmo, fUnitWeight), 0, nullptr },  // float
+        { "NameID",                 5, offsetof(NDb::CRPGAmmo, pName), 0, "CString" },  // ref
+        { "GrenadeID",              5, offsetof(NDb::CRPGAmmo, pExplosiveBullet), 0, "CRPGGrenade" },  // ref
+        { "AmmoGroup",              0, offsetof(NDb::CRPGAmmo, nAmmoGroup), 0, nullptr },  // int
+        { "UnconsciousProbability", 0, offsetof(NDb::CRPGAmmo, nUnconsciousProbability), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CAnimWeaponType  (from DataRPG.cpp:325)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CAnimWeaponType>() {
+    static const SColumnInfo cols[] = {
+        { "CrawlX",      2, offsetof(NDb::CAnimWeaponType, crawl), offsetof(CVec3, x), nullptr },  // float
+        { "CrawlY",      2, offsetof(NDb::CAnimWeaponType, crawl), offsetof(CVec3, y), nullptr },  // float
+        { "CrawlZ",      2, offsetof(NDb::CAnimWeaponType, crawl), offsetof(CVec3, z), nullptr },  // float
+        { "CrouchX",     2, offsetof(NDb::CAnimWeaponType, crouch), offsetof(CVec3, x), nullptr },  // float
+        { "CrouchY",     2, offsetof(NDb::CAnimWeaponType, crouch), offsetof(CVec3, y), nullptr },  // float
+        { "CrouchZ",     2, offsetof(NDb::CAnimWeaponType, crouch), offsetof(CVec3, z), nullptr },  // float
+        { "StandX",      2, offsetof(NDb::CAnimWeaponType, stand), offsetof(CVec3, x), nullptr },  // float
+        { "StandY",      2, offsetof(NDb::CAnimWeaponType, stand), offsetof(CVec3, y), nullptr },  // float
+        { "StandZ",      2, offsetof(NDb::CAnimWeaponType, stand), offsetof(CVec3, z), nullptr },  // float
+        { "MinDistance", 2, offsetof(NDb::CAnimWeaponType, fMinDistance), 0, nullptr },  // float
+        { "AimedStrafe", 1, offsetof(NDb::CAnimWeaponType, bAimedStrafe), 0, nullptr },  // bool
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGWeapon  (from DataRPG.cpp:385)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGWeapon>() {
+    static const SColumnInfo cols[] = {
+        { "InitialVelocity",       0, offsetof(NDb::CRPGWeapon, nInitialVelocity), 0, nullptr },  // int
+        { "ReloadAP",              0, offsetof(NDb::CRPGWeapon, nReloadAP), 0, nullptr },  // int
+        { "ShotAP",                0, offsetof(NDb::CRPGWeapon, nShotAP), 0, nullptr },  // int
+        { "Targeting",             0, offsetof(NDb::CRPGWeapon, nTargetingAP), 0, nullptr },  // int
+        { "Recoil",                0, offsetof(NDb::CRPGWeapon, nRecoil), 0, nullptr },  // int
+        { "RoF",                   0, offsetof(NDb::CRPGWeapon, nRoF), 0, nullptr },  // int
+        { "DamageM�d",             0, offsetof(NDb::CRPGWeapon, nDamageMod), 0, nullptr },  // int
+        { "WeaponTypeID",          5, offsetof(NDb::CRPGWeapon, pWeaponType), 0, "CRPGWeaponType" },  // ref
+        { "AmmoTypeID",            5, offsetof(NDb::CRPGWeapon, pAmmo), 0, "CRPGAmmo" },  // ref
+        { "ItemID",                5, offsetof(NDb::CRPGWeapon, pItem), 0, "CRPGItem" },  // ref
+        { "MinRange",              0, offsetof(NDb::CRPGWeapon, nMinRange), 0, nullptr },  // int
+        { "MaxRange",              0, offsetof(NDb::CRPGWeapon, nMaxRange), 0, nullptr },  // int
+        { "SoundID",               5, offsetof(NDb::CRPGWeapon, pSound), 0, "CSound" },  // ref
+        { "BurstSoundID",          5, offsetof(NDb::CRPGWeapon, pSoundBurst), 0, "CSound" },  // ref
+        { "ReloadSoundID",         5, offsetof(NDb::CRPGWeapon, pSoundReload), 0, "CSound" },  // ref
+        { "BurstEndSoundID",       5, offsetof(NDb::CRPGWeapon, pSoundFinishBurst), 0, "CSound" },  // ref
+        { "LongBurstSoundID",      5, offsetof(NDb::CRPGWeapon, pSoundCycleBurst), 0, "CSound" },  // ref
+        { "Scope",                 1, offsetof(NDb::CRPGWeapon, bScope), 0, nullptr },  // bool
+        { "AnimationName",         3, offsetof(NDb::CRPGWeapon, szAnimName), 0, nullptr },  // string
+        { "Quality",               0, offsetof(NDb::CRPGWeapon, nQuality), 0, nullptr },  // int
+        { "ShotEffectID",          5, offsetof(NDb::CRPGWeapon, pShotEffect), 0, "CTEffect" },  // ref
+        { "AnimWeaponID",          5, offsetof(NDb::CRPGWeapon, pAnimWeaponType), 0, "CAnimWeaponType" },  // ref
+        { "TrailSpeed",            2, offsetof(NDb::CRPGWeapon, fTrailSpeed), 0, nullptr },  // float
+        { "TrailEffectID",         5, offsetof(NDb::CRPGWeapon, pTrailEffect), 0, "CTRndModel" },  // ref
+        { "TrailParticleID",       5, offsetof(NDb::CRPGWeapon, pTrailParticle), 0, "CTEffect" },  // ref
+        { "InnerClip",             5, offsetof(NDb::CRPGWeapon, pInnerClip), 0, "CRPGClip" },  // ref
+        { "InnerClipAmmoQuantity", 0, offsetof(NDb::CRPGWeapon, nInnerClipAmmoQuantity), 0, nullptr },  // int
+        { "PanzerkleinWeaponType", 0, offsetof(NDb::CRPGWeapon, nPanzerkleinType), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGUniform  (from DataRPG.cpp:453)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGUniform>() {
+    static const SColumnInfo cols[] = {
+        { "CapModelID",      5, offsetof(NDb::CRPGUniform, pCapModel), 0, "CTRndModel" },  // ref
+        { "BackpackModelID", 5, offsetof(NDb::CRPGUniform, pBackpackModel), 0, "CTRndModel" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGGrenade  (from DataRPG.cpp:483)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGGrenade>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID",               5, offsetof(NDb::CRPGGrenade, pItem), 0, "CRPGItem" },  // ref
+        { "WaveNumber",           0, offsetof(NDb::CRPGGrenade, nWaveNumber), 0, nullptr },  // int
+        { "WaveDmgMin",           2, offsetof(NDb::CRPGGrenade, fWaveDmgMin), 0, nullptr },  // float
+        { "WaveDmgMax",           2, offsetof(NDb::CRPGGrenade, fWaveDmgMax), 0, nullptr },  // float
+        { "CriticalProbability",  0, offsetof(NDb::CRPGGrenade, nCriticalProbability), 0, nullptr },  // int
+        { "CriticalDifficulty",   0, offsetof(NDb::CRPGGrenade, nCriticalDifficulty), 0, nullptr },  // int
+        { "StructureDamageCoeff", 2, offsetof(NDb::CRPGGrenade, fStructureDamageCoeff), 0, nullptr },  // float
+        { "FragmentNumber",       0, offsetof(NDb::CRPGGrenade, nFragmentNumber), 0, nullptr },  // int
+        { "FragmentAPA",          0, offsetof(NDb::CRPGGrenade, nFragmentAPA), 0, nullptr },  // int
+        { "FragmentDmgMin",       0, offsetof(NDb::CRPGGrenade, nFragmentDmgMin), 0, nullptr },  // int
+        { "FragmentDmgMax",       0, offsetof(NDb::CRPGGrenade, nFragmentDmgMax), 0, nullptr },  // int
+        { "MaxDelay",             0, offsetof(NDb::CRPGGrenade, nMaxDelay), 0, nullptr },  // int
+        { "Quality",              0, offsetof(NDb::CRPGGrenade, nQuality), 0, nullptr },  // int
+        { "WeaponTypeID",         5, offsetof(NDb::CRPGGrenade, pWeaponType), 0, "CRPGWeaponType" },  // ref
+        { "WaveRadius",           2, offsetof(NDb::CRPGGrenade, fWaveRadius), 0, nullptr },  // float
+        { "PanzerkleinWeapon",    0, offsetof(NDb::CRPGGrenade, nPanzerkleinWeapon), 0, nullptr },  // int
+        { "DecalRadius",          2, offsetof(NDb::CRPGGrenade, fDecalRadius), 0, nullptr },  // float
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGFirstAid  (from DataRPG.cpp:518)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGFirstAid>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID",        5, offsetof(NDb::CRPGFirstAid, pItem), 0, "CRPGItem" },  // ref
+        { "Quantity",      0, offsetof(NDb::CRPGFirstAid, nQuantity), 0, nullptr },  // int
+        { "RequiredSkill", 0, offsetof(NDb::CRPGFirstAid, nRequiedSkill), 0, nullptr },  // int
+        { "SkillModifier", 0, offsetof(NDb::CRPGFirstAid, nSkillModifier), 0, nullptr },  // int
+        { "Duration",      0, offsetof(NDb::CRPGFirstAid, nDuration), 0, nullptr },  // int
+        { "Power",         2, offsetof(NDb::CRPGFirstAid, fPower), 0, nullptr },  // float
+        { "TotalHealVP",   0, offsetof(NDb::CRPGFirstAid, nTotalHealVP), 0, nullptr },  // int
+        { "APToUse",       0, offsetof(NDb::CRPGFirstAid, nAPToUse), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGMeleeWeapon  (from DataRPG.cpp:550)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGMeleeWeapon>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID",                 5, offsetof(NDb::CRPGMeleeWeapon, pItem), 0, "CRPGItem" },  // ref
+        { "DmgMin",                 0, offsetof(NDb::CRPGMeleeWeapon, nDmgMin), 0, nullptr },  // int
+        { "DmgMax",                 0, offsetof(NDb::CRPGMeleeWeapon, nDmgMax), 0, nullptr },  // int
+        { "ToHitBonus",             0, offsetof(NDb::CRPGMeleeWeapon, nToHitBonus), 0, nullptr },  // int
+        { "CriticalBonus",          0, offsetof(NDb::CRPGMeleeWeapon, nCriticalBonus), 0, nullptr },  // int
+        { "MinAP",                  0, offsetof(NDb::CRPGMeleeWeapon, nMinAP), 0, nullptr },  // int
+        { "MaxAP",                  0, offsetof(NDb::CRPGMeleeWeapon, nMaxAP), 0, nullptr },  // int
+        { "WeaponTypeID",           5, offsetof(NDb::CRPGMeleeWeapon, pWeaponType), 0, "CRPGWeaponType" },  // ref
+        { "AnimWeaponID",           5, offsetof(NDb::CRPGMeleeWeapon, pAnimWeaponType), 0, "CAnimWeaponType" },  // ref
+        { "Throwing",               1, offsetof(NDb::CRPGMeleeWeapon, bThrowing), 0, nullptr },  // bool
+        { "UnconsciousProbability", 0, offsetof(NDb::CRPGMeleeWeapon, nUnconsciousProbability), 0, nullptr },  // int
+        { "PanzerkleinWeaponType",  0, offsetof(NDb::CRPGMeleeWeapon, nPanzerkleinType), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGMineDetector  (from DataRPG.cpp:578)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGMineDetector>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID", 5, offsetof(NDb::CRPGMineDetector, pItem), 0, "CRPGItem" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGMine  (from DataRPG.cpp:589)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGMine>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID",    5, offsetof(NDb::CRPGMine, pItem), 0, "CRPGItem" },  // ref
+        { "APToSet",   0, offsetof(NDb::CRPGMine, nAPToSet), 0, nullptr },  // int
+        { "Explosion", 5, offsetof(NDb::CRPGMine, pExplosion), 0, "CRPGGrenade" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGTool  (from DataRPG.cpp:602)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGTool>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID",                    5, offsetof(NDb::CRPGTool, pItem), 0, "CRPGItem" },  // ref
+        { "Charges",                   0, offsetof(NDb::CRPGTool, nCharges), 0, nullptr },  // int
+        { "NeededEngSkill",            0, offsetof(NDb::CRPGTool, nNeededEngSkill), 0, nullptr },  // int
+        { "NeededPerkID",              5, offsetof(NDb::CRPGTool, pNeededPerk), 0, "CDBPerk" },  // ref
+        { "CanUseForMineCleaning",     1, offsetof(NDb::CRPGTool, bCanUseForMineCleaning), 0, nullptr },  // bool
+        { "SkillModifForMineCleaning", 0, offsetof(NDb::CRPGTool, nSkillModifForMineCleaning), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGKey  (from DataRPG.cpp:619)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGKey>() {
+    static const SColumnInfo cols[] = {
+        { "ItemID", 5, offsetof(NDb::CRPGKey, pItem), 0, "CRPGItem" },  // ref
+        { "KeyID",  0, offsetof(NDb::CRPGKey, nKeyID), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGClass  (from DataRPG.cpp:655)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGClass>() {
+    static const SColumnInfo cols[] = {
+        { "PerkTreeID",   0, offsetof(NDb::CRPGClass, nPerkTreeID), 0, nullptr },  // int
+        { "ToolTip",      5, offsetof(NDb::CRPGClass, pToolTip), 0, "CString" },  // ref
+        { "Icon",         5, offsetof(NDb::CRPGClass, pIcon), 0, "CUITexture" },  // ref
+        { "IconDisabled", 5, offsetof(NDb::CRPGClass, pIconDisabled), 0, "CUITexture" },  // ref
+        { "PerksPanel",   5, offsetof(NDb::CRPGClass, pPerksPanel), 0, "CUIContainer" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGBaseValue  (from DataRPG.cpp:668)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGBaseValue>() {
+    static const SColumnInfo cols[] = {
+        { "XP", 0, offsetof(NDb::CRPGBaseValue, nBaseXP), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGPers  (from DataRPG.cpp:687)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGPers>() {
+    static const SColumnInfo cols[] = {
+        { "ID",                    0, offsetof(NDb::CRPGPers, nRPGPersID), 0, nullptr },  // int
+        { "UserName",              3, offsetof(NDb::CRPGPers, szUserName), 0, nullptr },  // string
+        { "FaceID",                5, offsetof(NDb::CRPGPers, pHead), 0, "CComplexHead" },  // ref
+        { "ModelID",               5, offsetof(NDb::CRPGPers, pModel), 0, "CTRndModel" },  // ref
+        { "HitSoundID",            5, offsetof(NDb::CRPGPers, pSoundHit), 0, "CTSound" },  // ref
+        { "DisplayName",           5, offsetof(NDb::CRPGPers, pName), 0, "CString" },  // ref
+        { "DeathSoundID",          5, offsetof(NDb::CRPGPers, pSoundDeath), 0, "CTSound" },  // ref
+        { "SideID",                5, offsetof(NDb::CRPGPers, pSide), 0, "CSide" },  // ref
+        { "ClassID",               5, offsetof(NDb::CRPGPers, pClass), 0, "CRPGClass" },  // ref
+        { "WeaponID",              5, offsetof(NDb::CRPGPers, pWeapon), 0, "CRPGWeapon" },  // ref
+        { "UniformID",             5, offsetof(NDb::CRPGPers, pUniform), 0, "CRPGUniform" },  // ref
+        { "BaseValueID",           5, offsetof(NDb::CRPGPers, pBaseValue), 0, "CRPGBaseValue" },  // ref
+        { "NationalityID",         5, offsetof(NDb::CRPGPers, pNationality), 0, "CNationality" },  // ref
+        { "FaceGenCameraYaw",      2, offsetof(NDb::CRPGPers, sFaceGenCamera), offsetof(SCameraParams, fYaw), nullptr },  // float
+        { "FaceGenCameraPitch",    2, offsetof(NDb::CRPGPers, sFaceGenCamera), offsetof(SCameraParams, fPitch), nullptr },  // float
+        { "FaceGenCameraDistance", 2, offsetof(NDb::CRPGPers, sFaceGenCamera), offsetof(SCameraParams, fDistance), nullptr },  // float
+        { "CameraYaw",             2, offsetof(NDb::CRPGPers, sPortraitCamera), offsetof(SCameraParams, fYaw), nullptr },  // float
+        { "CameraPitch",           2, offsetof(NDb::CRPGPers, sPortraitCamera), offsetof(SCameraParams, fPitch), nullptr },  // float
+        { "CameraDistance",        2, offsetof(NDb::CRPGPers, sPortraitCamera), offsetof(SCameraParams, fDistance), nullptr },  // float
+        { "WearingPanzerkleinID",  5, offsetof(NDb::CRPGPers, pDefaultWearsPanzerklein), 0, "CRPGPers" },  // ref
+        { "IsFemale",              1, offsetof(NDb::CRPGPers, bIsFemale), 0, nullptr },  // bool
+        { "Voice",                 0, offsetof(NDb::CRPGPers, nVoice), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGClip  (from DataRPG.cpp:727)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGClip>() {
+    static const SColumnInfo cols[] = {
+        { "AmmoGroup", 0, offsetof(NDb::CRPGClip, nAmmoGroup), 0, nullptr },  // int
+        { "Quantity",  0, offsetof(NDb::CRPGClip, nQuantity), 0, nullptr },  // int
+        { "ItemID",    5, offsetof(NDb::CRPGClip, pItem), 0, "CRPGItem" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CScript  (from DataRPG.cpp:738)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CScript>() {
     static const SColumnInfo cols[] = {
         { "CodeText", 3, offsetof(NDb::CScript, strCode), 0, nullptr },  // string
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGCritical  (from DataRPG.cpp:743)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGCritical>() {
+    static const SColumnInfo cols[] = {
+        { "QueueIndex",  0, offsetof(NDb::CRPGCritical, nWeight), 0, nullptr },  // int
+        { "Range",       0, offsetof(NDb::CRPGCritical, nRange), 0, nullptr },  // int
+        { "MinDuration", 0, offsetof(NDb::CRPGCritical, nMinDuration), 0, nullptr },  // int
+        { "MaxDuration", 0, offsetof(NDb::CRPGCritical, nMaxDuration), 0, nullptr },  // int
+        { "Value",       2, offsetof(NDb::CRPGCritical, fValue), 0, nullptr },  // float
+        { "UserName",    3, offsetof(NDb::CRPGCritical, szName), 0, nullptr },  // string
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -448,6 +1415,60 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGInterruptsConstants>(
     return cols;
 }
 
+// CPanzerklein  (from DataRPG.cpp:959)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CPanzerklein>() {
+    static const SColumnInfo cols[] = {
+        { "PersID",              5, offsetof(NDb::CPanzerklein, pPers), 0, "CRPGPers" },  // ref
+        { "RicochetProb",        0, offsetof(NDb::CPanzerklein, nRicochetProb), 0, nullptr },  // int
+        { "MaxVP",               0, offsetof(NDb::CPanzerklein, nMaxVP), 0, nullptr },  // int
+        { "AddMoveAP",           0, offsetof(NDb::CPanzerklein, nAddMoveAP), 0, nullptr },  // int
+        { "AddCoverIgnore",      2, offsetof(NDb::CPanzerklein, fAddCoverIgnore), 0, nullptr },  // float
+        { "SensorRange",         2, offsetof(NDb::CPanzerklein, fSensorRange), 0, nullptr },  // float
+        { "RegenerationValue",   2, offsetof(NDb::CPanzerklein, fRegenerationValue), 0, nullptr },  // float
+        { "CriticalResist",      2, offsetof(NDb::CPanzerklein, fCriticalResist), 0, nullptr },  // float
+        { "ArmorID",             5, offsetof(NDb::CPanzerklein, pArmor), 0, "CRPGArmor" },  // ref
+        { "EncumbranceKoeff",    2, offsetof(NDb::CPanzerklein, fEncumbranceKoeff), 0, nullptr },  // float
+        { "SelfExplosionID",     5, offsetof(NDb::CPanzerklein, pSelfExplosion), 0, "CRPGGrenade" },  // ref
+        { "LeftHandItemID",      5, offsetof(NDb::CPanzerklein, pLeftHandItem), 0, "CRPGItem" },  // ref
+        { "StrengthForGrenades", 0, offsetof(NDb::CPanzerklein, nGrenadeStrength), 0, nullptr },  // int
+        { "HasNoHead",           1, offsetof(NDb::CPanzerklein, bHasNoHead), 0, nullptr },  // bool
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CNationality  (from DataRPG.cpp:993)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CNationality>() {
+    static const SColumnInfo cols[] = {
+        { "ToolTip",             5, offsetof(NDb::CNationality, pToolTip), 0, "CString" },  // ref
+        { "MaleHead",            5, offsetof(NDb::CNationality, pMaleHead), 0, "CComplexHead" },  // ref
+        { "FemaleHead",          5, offsetof(NDb::CNationality, pFemaleHead), 0, "CComplexHead" },  // ref
+        { "FlagTexture",         5, offsetof(NDb::CNationality, pFlag), 0, "CUITexture" },  // ref
+        { "IconNormalTexture",   5, offsetof(NDb::CNationality, pIconNormal), 0, "CUITexture" },  // ref
+        { "IconDisabledTexture", 5, offsetof(NDb::CNationality, pIconDisabled), 0, "CUITexture" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CSide  (from DataRPG.cpp:1021)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CSide>() {
+    static const SColumnInfo cols[] = {
+        { "GlobalMap",          0, offsetof(NDb::CSide, nGlobalMapID), 0, nullptr },  // int
+        { "HeroSelectTemplate", 0, offsetof(NDb::CSide, nHeroSelectTemplate), 0, nullptr },  // int
+        { "StringID",           5, offsetof(NDb::CSide, pName), 0, "CString" },  // ref
+        { "Nationality1",       5, offsetof(NDb::CSide, pNationality1), 0, "CNationality" },  // ref
+        { "Nationality2",       5, offsetof(NDb::CSide, pNationality2), 0, "CNationality" },  // ref
+        { "Nationality3",       5, offsetof(NDb::CSide, pNationality3), 0, "CNationality" },  // ref
+        { "ESCMenuBackground",  5, offsetof(NDb::CSide, pESCMenuBackground), 0, "CUITexture" },  // ref
+        { "UIBaseFlag",         5, offsetof(NDb::CSide, pBaseFlag), 0, "CUITexture" },  // ref
+        { "UIBaseFlagActive",   5, offsetof(NDb::CSide, pBaseFlagActive), 0, "CUITexture" },  // ref
+        { "HeroDialogPersID",   5, offsetof(NDb::CSide, pDialogHero), 0, "CDBDialogPers" },  // ref
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CDBMinesConstants  (from DataRpgConstants.cpp:12)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBMinesConstants>() {
     static const SColumnInfo cols[] = {
@@ -455,6 +1476,15 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBMinesConstants>() {
         { "SpotSkillModif",          0, offsetof(NDb::CDBMinesConstants, nSpotSkillModif), 0, nullptr },  // int
         { "MinerEngineerSkillModif", 0, offsetof(NDb::CDBMinesConstants, nMinerEngineerSkillModif), 0, nullptr },  // int
         { "MineSpotModif",           0, offsetof(NDb::CDBMinesConstants, nMineSpotModif), 0, nullptr },  // int
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CRPGClip4Pers  (from DataRPGTmp.cpp:19)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGClip4Pers>() {
+    static const SColumnInfo cols[] = {
+        { "RPGAmmoID", 5, offsetof(NDb::CRPGClip4Pers, pAmmo), 0, "CRPGAmmo" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -472,10 +1502,51 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGItem2Uniform>() {
     return cols;
 }
 
+// CDBScenarioZone  (from DataScenario.cpp:48)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioZone>() {
+    static const SColumnInfo cols[] = {
+        { "Scenario",         5, offsetof(NDb::CDBScenarioZone, pScenario), 0, "CDBScenario" },  // ref
+        { "ItemSlots",        0, offsetof(NDb::CDBScenarioZone, nItemSlots), 0, nullptr },  // int
+        { "PersonSlots",      0, offsetof(NDb::CDBScenarioZone, nPersonSlots), 0, nullptr },  // int
+        { "SmallDescription", 3, offsetof(NDb::CDBScenarioZone, sSmallDescription), 0, nullptr },  // string
+        { "CluesMaxNumber",   0, offsetof(NDb::CDBScenarioZone, nCluesMaxNumber), 0, nullptr },  // int
+        { "CanBeRevealed",    1, offsetof(NDb::CDBScenarioZone, bCanBeRevealed), 0, nullptr },  // bool
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
 // CDBScenarioState  (from DataScenario.cpp:62)
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioState>() {
     static const SColumnInfo cols[] = {
         { "Description", 3, offsetof(NDb::CDBScenarioState, sDescription), 0, nullptr },  // string
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBScenarioClue  (from DataScenario.cpp:67)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioClue>() {
+    static const SColumnInfo cols[] = {
+        { "Scenario",         5, offsetof(NDb::CDBScenarioClue, pScenario), 0, "CDBScenario" },  // ref
+        { "State",            5, offsetof(NDb::CDBScenarioClue, pState), 0, "CDBScenarioState" },  // ref
+        { "SmallDescription", 3, offsetof(NDb::CDBScenarioClue, sSmallDescription), 0, nullptr },  // string
+        { "ItemID",           0, offsetof(NDb::CDBScenarioClue, nItemID), 0, nullptr },  // int
+        { "PersID",           0, offsetof(NDb::CDBScenarioClue, nPersID), 0, nullptr },  // int
+        { "Permanent",        1, offsetof(NDb::CDBScenarioClue, bPermanent), 0, nullptr },  // bool
+        { "MinParentToOpen",  0, offsetof(NDb::CDBScenarioClue, nMinParentToOpen), 0, nullptr },  // int
+        { "Description",      5, offsetof(NDb::CDBScenarioClue, pDescription), 0, "CString" },  // ref
+        { "GiveImmediately",  1, offsetof(NDb::CDBScenarioClue, bGiveImmediately), 0, nullptr },  // bool
+        { nullptr, 0, 0, 0, nullptr }  // sentinel
+    };
+    return cols;
+}
+
+// CDBScenarioObjective  (from DataScenario.cpp:91)
+template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioObjective>() {
+    static const SColumnInfo cols[] = {
+        { "Description", 5, offsetof(NDb::CDBScenarioObjective, pDescription), 0, "CString" },  // ref
+        { "Scenario",    5, offsetof(NDb::CDBScenarioObjective, pScenario), 0, "CDBScenario" },  // ref
         { nullptr, 0, 0, 0, nullptr }  // sentinel
     };
     return cols;
@@ -521,87 +1592,221 @@ struct SSchemaEntry {
     const SColumnInfo* (*getter)();
 };
 
+inline const SColumnInfo* getSchemaCRndModel() { return GetSchemaFor<NDb::CRndModel>(); }
+inline const SColumnInfo* getSchemaCAnimation() { return GetSchemaFor<NDb::CAnimation>(); }
+inline const SColumnInfo* getSchemaCTexture() { return GetSchemaFor<NDb::CTexture>(); }
 inline const SColumnInfo* getSchemaCTemplate() { return GetSchemaFor<NDb::CTemplate>(); }
+inline const SColumnInfo* getSchemaCTemplVariant() { return GetSchemaFor<NDb::CTemplVariant>(); }
+inline const SColumnInfo* getSchemaCRectangle() { return GetSchemaFor<NDb::CRectangle>(); }
+inline const SColumnInfo* getSchemaCFinalElement() { return GetSchemaFor<NDb::CFinalElement>(); }
 inline const SColumnInfo* getSchemaCBRDF() { return GetSchemaFor<NDb::CBRDF>(); }
+inline const SColumnInfo* getSchemaCMaterial() { return GetSchemaFor<NDb::CMaterial>(); }
 inline const SColumnInfo* getSchemaCGeometry() { return GetSchemaFor<NDb::CGeometry>(); }
+inline const SColumnInfo* getSchemaCUnit() { return GetSchemaFor<NDb::CUnit>(); }
 inline const SColumnInfo* getSchemaCTypeface() { return GetSchemaFor<NDb::CTypeface>(); }
 inline const SColumnInfo* getSchemaCSkeleton() { return GetSchemaFor<NDb::CSkeleton>(); }
+inline const SColumnInfo* getSchemaCTerrainTile() { return GetSchemaFor<NDb::CTerrainTile>(); }
+inline const SColumnInfo* getSchemaCChapterMap() { return GetSchemaFor<NDb::CChapterMap>(); }
 inline const SColumnInfo* getSchemaCGlobalMap() { return GetSchemaFor<NDb::CGlobalMap>(); }
+inline const SColumnInfo* getSchemaCAIGeometry() { return GetSchemaFor<NDb::CAIGeometry>(); }
 inline const SColumnInfo* getSchemaCWallModel() { return GetSchemaFor<NDb::CWallModel>(); }
 inline const SColumnInfo* getSchemaCFloorModel() { return GetSchemaFor<NDb::CFloorModel>(); }
 inline const SColumnInfo* getSchemaCWall() { return GetSchemaFor<NDb::CWall>(); }
 inline const SColumnInfo* getSchemaCFloor() { return GetSchemaFor<NDb::CFloor>(); }
+inline const SColumnInfo* getSchemaCParticle() { return GetSchemaFor<NDb::CParticle>(); }
 inline const SColumnInfo* getSchemaCSolidModel() { return GetSchemaFor<NDb::CSolidModel>(); }
 inline const SColumnInfo* getSchemaCSolid() { return GetSchemaFor<NDb::CSolid>(); }
 inline const SColumnInfo* getSchemaCContainer() { return GetSchemaFor<NDb::CContainer>(); }
+inline const SColumnInfo* getSchemaCAmbientLight() { return GetSchemaFor<NDb::CAmbientLight>(); }
 inline const SColumnInfo* getSchemaCRoom() { return GetSchemaFor<NDb::CRoom>(); }
+inline const SColumnInfo* getSchemaCRndContainerModel() { return GetSchemaFor<NDb::CRndContainerModel>(); }
 inline const SColumnInfo* getSchemaCAttribute() { return GetSchemaFor<NDb::CAttribute>(); }
 inline const SColumnInfo* getSchemaCSound() { return GetSchemaFor<NDb::CSound>(); }
 inline const SColumnInfo* getSchemaCDebris() { return GetSchemaFor<NDb::CDebris>(); }
+inline const SColumnInfo* getSchemaCRndObject() { return GetSchemaFor<NDb::CRndObject>(); }
+inline const SColumnInfo* getSchemaCTRndObject() { return GetSchemaFor<NDb::CTRndObject>(); }
+inline const SColumnInfo* getSchemaCExplosion() { return GetSchemaFor<NDb::CExplosion>(); }
+inline const SColumnInfo* getSchemaCUIControl() { return GetSchemaFor<NDb::CUIControl>(); }
 inline const SColumnInfo* getSchemaCUIContainer() { return GetSchemaFor<NDb::CUIContainer>(); }
+inline const SColumnInfo* getSchemaCString() { return GetSchemaFor<NDb::CString>(); }
+inline const SColumnInfo* getSchemaCRndConstructionPart() { return GetSchemaFor<NDb::CRndConstructionPart>(); }
+inline const SColumnInfo* getSchemaCGrass() { return GetSchemaFor<NDb::CGrass>(); }
+inline const SColumnInfo* getSchemaCRndTerrainSpot() { return GetSchemaFor<NDb::CRndTerrainSpot>(); }
+inline const SColumnInfo* getSchemaCRPGCritical() { return GetSchemaFor<NDb::CRPGCritical>(); }
+inline const SColumnInfo* getSchemaCAISound() { return GetSchemaFor<NDb::CAISound>(); }
 inline const SColumnInfo* getSchemaCCubeTexture() { return GetSchemaFor<NDb::CCubeTexture>(); }
+inline const SColumnInfo* getSchemaCDBAckInfo() { return GetSchemaFor<NDb::CDBAckInfo>(); }
+inline const SColumnInfo* getSchemaCDBAckSequence() { return GetSchemaFor<NDb::CDBAckSequence>(); }
+inline const SColumnInfo* getSchemaCDBAck() { return GetSchemaFor<NDb::CDBAck>(); }
+inline const SColumnInfo* getSchemaCSoundVariant() { return GetSchemaFor<NDb::CSoundVariant>(); }
 inline const SColumnInfo* getSchemaCRPGToHit() { return GetSchemaFor<NDb::CRPGToHit>(); }
+inline const SColumnInfo* getSchemaCWaypoint() { return GetSchemaFor<NDb::CWaypoint>(); }
+inline const SColumnInfo* getSchemaCDoor() { return GetSchemaFor<NDb::CDoor>(); }
+inline const SColumnInfo* getSchemaCGun() { return GetSchemaFor<NDb::CGun>(); }
 inline const SColumnInfo* getSchemaCWaypointName() { return GetSchemaFor<NDb::CWaypointName>(); }
+inline const SColumnInfo* getSchemaCParticleInstance() { return GetSchemaFor<NDb::CParticleInstance>(); }
+inline const SColumnInfo* getSchemaCEffect() { return GetSchemaFor<NDb::CEffect>(); }
+inline const SColumnInfo* getSchemaCAnimWeaponType() { return GetSchemaFor<NDb::CAnimWeaponType>(); }
 inline const SColumnInfo* getSchemaCRPGAISoundConstants() { return GetSchemaFor<NDb::CRPGAISoundConstants>(); }
 inline const SColumnInfo* getSchemaCHead() { return GetSchemaFor<NDb::CHead>(); }
 inline const SColumnInfo* getSchemaCRPGInterruptsConstants() { return GetSchemaFor<NDb::CRPGInterruptsConstants>(); }
+inline const SColumnInfo* getSchemaCRPGDmgToArmor() { return GetSchemaFor<NDb::CRPGDmgToArmor>(); }
+inline const SColumnInfo* getSchemaCLightInstance() { return GetSchemaFor<NDb::CLightInstance>(); }
+inline const SColumnInfo* getSchemaCComplexHead() { return GetSchemaFor<NDb::CComplexHead>(); }
+inline const SColumnInfo* getSchemaCMusic() { return GetSchemaFor<NDb::CMusic>(); }
 inline const SColumnInfo* getSchemaCSpot() { return GetSchemaFor<NDb::CSpot>(); }
+inline const SColumnInfo* getSchemaCDBScenarioZone() { return GetSchemaFor<NDb::CDBScenarioZone>(); }
 inline const SColumnInfo* getSchemaCDBScenarioState() { return GetSchemaFor<NDb::CDBScenarioState>(); }
+inline const SColumnInfo* getSchemaCDBScenarioClue() { return GetSchemaFor<NDb::CDBScenarioClue>(); }
+inline const SColumnInfo* getSchemaCDBScenarioObjective() { return GetSchemaFor<NDb::CDBScenarioObjective>(); }
 inline const SColumnInfo* getSchemaCDBScenario() { return GetSchemaFor<NDb::CDBScenario>(); }
 inline const SColumnInfo* getSchemaCDBScenarioObjective2Clue() { return GetSchemaFor<NDb::CDBScenarioObjective2Clue>(); }
+inline const SColumnInfo* getSchemaCPassageObject() { return GetSchemaFor<NDb::CPassageObject>(); }
+inline const SColumnInfo* getSchemaCPanzerklein() { return GetSchemaFor<NDb::CPanzerklein>(); }
 inline const SColumnInfo* getSchemaCDBCamera() { return GetSchemaFor<NDb::CDBCamera>(); }
 inline const SColumnInfo* getSchemaCRPGMaterial() { return GetSchemaFor<NDb::CRPGMaterial>(); }
 inline const SColumnInfo* getSchemaCDBAutoLoadScript() { return GetSchemaFor<NDb::CDBAutoLoadScript>(); }
+inline const SColumnInfo* getSchemaCSoundInstance() { return GetSchemaFor<NDb::CSoundInstance>(); }
+inline const SColumnInfo* getSchemaCSide() { return GetSchemaFor<NDb::CSide>(); }
+inline const SColumnInfo* getSchemaCNationality() { return GetSchemaFor<NDb::CNationality>(); }
 inline const SColumnInfo* getSchemaCDBDialog() { return GetSchemaFor<NDb::CDBDialog>(); }
+inline const SColumnInfo* getSchemaCDBDifficulty() { return GetSchemaFor<NDb::CDBDifficulty>(); }
+inline const SColumnInfo* getSchemaCTranslatedString() { return GetSchemaFor<NDb::CTranslatedString>(); }
+inline const SColumnInfo* getSchemaCDBPerk() { return GetSchemaFor<NDb::CDBPerk>(); }
+inline const SColumnInfo* getSchemaCDBPerkTreeNode() { return GetSchemaFor<NDb::CDBPerkTreeNode>(); }
 inline const SColumnInfo* getSchemaCDBDialogSeq() { return GetSchemaFor<NDb::CDBDialogSeq>(); }
 inline const SColumnInfo* getSchemaCDBDialogPers() { return GetSchemaFor<NDb::CDBDialogPers>(); }
 inline const SColumnInfo* getSchemaCDBMinesConstants() { return GetSchemaFor<NDb::CDBMinesConstants>(); }
+inline const SColumnInfo* getSchemaCRPGWeaponType() { return GetSchemaFor<NDb::CRPGWeaponType>(); }
+inline const SColumnInfo* getSchemaCRPGWeapon() { return GetSchemaFor<NDb::CRPGWeapon>(); }
+inline const SColumnInfo* getSchemaCRPGClass() { return GetSchemaFor<NDb::CRPGClass>(); }
+inline const SColumnInfo* getSchemaCRPGPers() { return GetSchemaFor<NDb::CRPGPers>(); }
 inline const SColumnInfo* getSchemaCRPGArmor() { return GetSchemaFor<NDb::CRPGArmor>(); }
+inline const SColumnInfo* getSchemaCRPGAmmo() { return GetSchemaFor<NDb::CRPGAmmo>(); }
+inline const SColumnInfo* getSchemaCRPGBaseValue() { return GetSchemaFor<NDb::CRPGBaseValue>(); }
+inline const SColumnInfo* getSchemaCRPGClip() { return GetSchemaFor<NDb::CRPGClip>(); }
+inline const SColumnInfo* getSchemaCRPGItem() { return GetSchemaFor<NDb::CRPGItem>(); }
+inline const SColumnInfo* getSchemaCRPGClip4Pers() { return GetSchemaFor<NDb::CRPGClip4Pers>(); }
 inline const SColumnInfo* getSchemaCScript() { return GetSchemaFor<NDb::CScript>(); }
+inline const SColumnInfo* getSchemaCRPGGrenade() { return GetSchemaFor<NDb::CRPGGrenade>(); }
+inline const SColumnInfo* getSchemaCRPGUniform() { return GetSchemaFor<NDb::CRPGUniform>(); }
 inline const SColumnInfo* getSchemaCRPGItem2Uniform() { return GetSchemaFor<NDb::CRPGItem2Uniform>(); }
+inline const SColumnInfo* getSchemaCRPGFirstAid() { return GetSchemaFor<NDb::CRPGFirstAid>(); }
+inline const SColumnInfo* getSchemaCRPGMeleeWeapon() { return GetSchemaFor<NDb::CRPGMeleeWeapon>(); }
+inline const SColumnInfo* getSchemaCRPGMineDetector() { return GetSchemaFor<NDb::CRPGMineDetector>(); }
 inline const SColumnInfo* getSchemaCRPGStoreItem() { return GetSchemaFor<NDb::CRPGStoreItem>(); }
+inline const SColumnInfo* getSchemaCRPGMine() { return GetSchemaFor<NDb::CRPGMine>(); }
+inline const SColumnInfo* getSchemaCRPGTool() { return GetSchemaFor<NDb::CRPGTool>(); }
+inline const SColumnInfo* getSchemaCRPGKey() { return GetSchemaFor<NDb::CRPGKey>(); }
 
 inline const SSchemaEntry* GetAllSchemas(int* outCount) {
     static const SSchemaEntry entries[] = {
+        { 0x00000001, &getSchemaCRndModel },  // Models
+        { 0x00000002, &getSchemaCAnimation },  // Animations
+        { 0x00000003, &getSchemaCTexture },  // Textures
         { 0x00000004, &getSchemaCTemplate },  // Templates
+        { 0x00000005, &getSchemaCTemplVariant },  // TemplVariants
+        { 0x00000006, &getSchemaCRectangle },  // Rects
+        { 0x00000007, &getSchemaCFinalElement },  // FinalElements
         { 0x00000008, &getSchemaCBRDF },  // BRDFs
+        { 0x00000009, &getSchemaCMaterial },  // Materials
         { 0x0000000a, &getSchemaCGeometry },  // Geometries
+        { 0x0000000b, &getSchemaCUnit },  // Units
         { 0x0000000c, &getSchemaCTypeface },  // Fonts
         { 0x0000000d, &getSchemaCSkeleton },  // Skeletons
+        { 0x0000000e, &getSchemaCTerrainTile },  // TerrainTiles
+        { 0x0000000f, &getSchemaCChapterMap },  // ChapterMaps
         { 0x00000010, &getSchemaCGlobalMap },  // GlobalMaps
+        { 0x00000014, &getSchemaCAIGeometry },  // AIGeometries
         { 0x00000015, &getSchemaCWallModel },  // WallModels
         { 0x00000016, &getSchemaCFloorModel },  // FloorModels
         { 0x00000017, &getSchemaCWall },  // Walls
         { 0x00000018, &getSchemaCFloor },  // Floors
+        { 0x00000019, &getSchemaCParticle },  // Particles
         { 0x0000001a, &getSchemaCSolidModel },  // SolidModels
         { 0x0000001b, &getSchemaCSolid },  // SolidObjects
         { 0x0000001c, &getSchemaCContainer },  // Containers
+        { 0x0000001d, &getSchemaCAmbientLight },  // AmbientLights
         { 0x0000001e, &getSchemaCRoom },  // Rooms
+        { 0x00000021, &getSchemaCRndContainerModel },  // ContainerModels
         { 0x00000023, &getSchemaCAttribute },  // Attributes
         { 0x00000025, &getSchemaCSound },  // Sounds
         { 0x00000027, &getSchemaCDebris },  // Debris
+        { 0x00000028, &getSchemaCRndObject },  // Objects
+        { 0x00000029, &getSchemaCTRndObject },  // ObjectTemplates
+        { 0x0000002a, &getSchemaCExplosion },  // Explosions
+        { 0x0000002b, &getSchemaCUIControl },  // UIControls
         { 0x0000002c, &getSchemaCUIContainer },  // UIContainers
+        { 0x0000002d, &getSchemaCString },  // Strings
+        { 0x0000002f, &getSchemaCRndConstructionPart },  // ConstructionParts
+        { 0x00000030, &getSchemaCGrass },  // Grass
+        { 0x00000032, &getSchemaCRndTerrainSpot },  // TerrainSpots
+        { 0x00000033, &getSchemaCRPGCritical },  // RPGCriticals
+        { 0x00000034, &getSchemaCAISound },  // AISounds
         { 0x00000035, &getSchemaCCubeTexture },  // CubeTextures
+        { 0x00000036, &getSchemaCDBAckInfo },  // AckInfos
+        { 0x00000037, &getSchemaCDBAckSequence },  // AckSeqs
+        { 0x00000038, &getSchemaCDBAck },  // Acks
+        { 0x00000039, &getSchemaCSoundVariant },  // SoundVariants
         { 0x0000003b, &getSchemaCRPGToHit },  // RPGToHits
+        { 0x0000003c, &getSchemaCWaypoint },  // Waypoints
+        { 0x0000003d, &getSchemaCDoor },  // Doors
+        { 0x0000003e, &getSchemaCGun },  // Guns
         { 0x0000003f, &getSchemaCWaypointName },  // WaypointNames
+        { 0x00000040, &getSchemaCParticleInstance },  // ParticleInstances
+        { 0x00000041, &getSchemaCEffect },  // Effects
+        { 0x00000043, &getSchemaCAnimWeaponType },  // AnimWeaponTypes
         { 0x00000044, &getSchemaCRPGAISoundConstants },  // AISoundConstants
         { 0x00000045, &getSchemaCHead },  // Heads
         { 0x00000047, &getSchemaCRPGInterruptsConstants },  // InterruptsConstants
+        { 0x00000048, &getSchemaCRPGDmgToArmor },  // RPGDmgToArmors
+        { 0x00000049, &getSchemaCLightInstance },  // LightInstances
+        { 0x0000004b, &getSchemaCComplexHead },  // ComplexHeads
+        { 0x0000004c, &getSchemaCMusic },  // Musics
         { 0x0000004e, &getSchemaCSpot },  // Spots
+        { 0x0000004f, &getSchemaCDBScenarioZone },  // ScenarioZones
         { 0x00000050, &getSchemaCDBScenarioState },  // ScenarioStates
+        { 0x00000051, &getSchemaCDBScenarioClue },  // ScenarioClues
+        { 0x00000052, &getSchemaCDBScenarioObjective },  // ScenarioObjectives
         { 0x00000053, &getSchemaCDBScenario },  // Scenarios
         { 0x00000054, &getSchemaCDBScenarioObjective2Clue },  // ScenarioObjective2Clues
+        { 0x00000056, &getSchemaCPassageObject },  // PassageObjects
+        { 0x00000057, &getSchemaCPanzerklein },  // Panzerkleins
         { 0x00000058, &getSchemaCDBCamera },  // Cameras
         { 0x0000005a, &getSchemaCRPGMaterial },  // RPGMaterials
         { 0x0000005b, &getSchemaCDBAutoLoadScript },  // AutoLoadScripts
+        { 0x0000005d, &getSchemaCSoundInstance },  // SoundInstances
+        { 0x0000005f, &getSchemaCSide },  // Sides
+        { 0x00000060, &getSchemaCNationality },  // Nationalities
         { 0x00000061, &getSchemaCDBDialog },  // Dialogs
+        { 0x00000062, &getSchemaCDBDifficulty },  // DifficultyConstants
+        { 0x00000064, &getSchemaCTranslatedString },  // TranslatedStrings
+        { 0x00000065, &getSchemaCDBPerk },  // RPGPerks
+        { 0x00000066, &getSchemaCDBPerkTreeNode },  // RPGPerkTreeNodes
         { 0x00000067, &getSchemaCDBDialogSeq },  // DialogSeqs
         { 0x00000068, &getSchemaCDBDialogPers },  // DialogPers
         { 0x00000069, &getSchemaCDBMinesConstants },  // RPGMinesConstants
+        { 0xe0000001, &getSchemaCRPGWeaponType },  // RPGWeaponTypes
+        { 0xe0000002, &getSchemaCRPGWeapon },  // RPGWeapons
+        { 0xe0000003, &getSchemaCRPGClass },  // RPGClasses
+        { 0xe0000004, &getSchemaCRPGPers },  // RPGPers
         { 0xe0000005, &getSchemaCRPGArmor },  // RPGArmors
+        { 0xe0000006, &getSchemaCRPGAmmo },  // RPGAmmos
+        { 0xe0000007, &getSchemaCRPGBaseValue },  // RPGBaseValues
+        { 0xe0000008, &getSchemaCRPGClip },  // RPGClips
+        { 0xe0000009, &getSchemaCRPGItem },  // RPGItems
+        { 0xe000000b, &getSchemaCRPGClip4Pers },  // RPGClip4Pers
         { 0xe000000c, &getSchemaCScript },  // Scripts
+        { 0xe000000d, &getSchemaCRPGGrenade },  // RPGGrenades
+        { 0xe000000e, &getSchemaCRPGUniform },  // RPGUniforms
         { 0xe0000010, &getSchemaCRPGItem2Uniform },  // RPGItem2Uniforms
+        { 0xe0000012, &getSchemaCRPGFirstAid },  // RPGFirstAids
+        { 0xe0000014, &getSchemaCRPGMeleeWeapon },  // RPGMeleeWeapons
+        { 0xe0000016, &getSchemaCRPGMineDetector },  // RPGMineDetectors
         { 0xe0000018, &getSchemaCRPGStoreItem },  // RPGStoreItems
+        { 0xe0000019, &getSchemaCRPGMine },  // RPGMines
+        { 0xe0000021, &getSchemaCRPGTool },  // RPGTools
+        { 0xe0000023, &getSchemaCRPGKey },  // RPGKeys
     };
     *outCount = sizeof(entries) / sizeof(entries[0]);
     return entries;

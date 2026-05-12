@@ -206,6 +206,13 @@ def map_type_to_code(type_spelling: str) -> int | None:
     return None
 
 
+# r32: when a member is declared `T name[N]` and ImportField targets &name[i],
+# we need to inspect the element type to determine the column kind. The
+# header parser already records the full declared type spelling (T) without
+# the [N] suffix (we use split on whitespace then take the type part), so
+# we can reuse map_type_to_code directly on the recorded type.
+
+
 # CPtr<X>, CRndPtr<X>, CDBPtr<X>, CWeakPtr<X> -> inner class name X (stripped
 # of namespace prefix like NDb::). Returns None if not a smart-pointer type.
 SMARTPTR_INNER_RE = re.compile(
@@ -351,15 +358,23 @@ REGISTER_DATABASE_RE = re.compile(
     re.VERBOSE,
 )
 
-# Within a single statement: NDatabase::ImportField( "Name", &expr );
-# The expression must be a single &<identifier>(.<identifier>)? — anything
-# else (cast, subscript, complex expr) disqualifies the class.
+# r32: relaxed ImportField extraction — finds every ImportField call in the
+# body regardless of surrounding control flow (loops, if-conditions, etc.).
+# Patterns recognized for the address expression after '&':
+#   outer
+#   outer.sub
+#   outer[N]          -> array element (N must be a literal integer)
+#   outer[N].sub
+# Anything else (function call, ptr-arith, casts, []s with non-literal index)
+# is skipped silently — the class still gets a partial schema instead of
+# being rejected outright.
 IMPORTFIELD_STMT_RE = re.compile(
-    r"""^\s*NDatabase\s*::\s*ImportField\s*\(\s*
+    r"""\bNDatabase\s*::\s*ImportField\s*\(\s*
         "(?P<colname>[^"\\]*)"\s*,\s*
         &\s*(?P<outer>[A-Za-z_]\w*)
+        (?:\s*\[\s*(?P<idx>\d+)\s*\])?
         (?:\s*\.\s*(?P<sub>[A-Za-z_]\w*))?
-        \s*\)\s*;\s*$
+        \s*\)\s*;
     """,
     re.VERBOSE,
 )
@@ -370,6 +385,7 @@ class ImportCall:
     colname: str
     outer: str
     sub: str | None
+    idx: int | None = None  # r32: array index for outer[idx] expressions
 
 
 @dataclass
@@ -513,31 +529,35 @@ def parse_cpp(path: Path):
             continue
         body = src[open_brace + 1 : close_brace]
         line_no = src.count("\n", 0, open_brace) + 1
-        statements = split_statements(body)
-        calls = []
-        bad_reason = None
-        for stmt in statements:
-            sm = IMPORTFIELD_STMT_RE.match(stmt)
-            if sm:
-                calls.append(
-                    ImportCall(
-                        colname=sm.group("colname"),
-                        outer=sm.group("outer"),
-                        sub=sm.group("sub"),
-                    )
-                )
+        # r32: scan whole body for all ImportField calls — even ones inside
+        # `if (IsValid(...))` blocks or `for (...)` loops — and dedupe
+        # by column name (keep first occurrence). Non-matching code is
+        # silently ignored (we just take what we recognise).
+        # Track imports keyed by (cname) so per-class dedupe works.
+        raw_calls = []  # list of (cname, outer, sub, idx)
+        seen_cols = set()
+        for sm in IMPORTFIELD_STMT_RE.finditer(body):
+            cname = sm.group("colname")
+            if cname in seen_cols:
                 continue
-            # Anything else disqualifies the class.
-            preview = re.sub(r"\s+", " ", stmt)[:80]
-            bad_reason = f"non-ImportField statement: {preview!r}"
-            break
-        if bad_reason is not None:
-            skipped.append(SkippedImport(cls, path.name, line_no, bad_reason))
-            continue
+            seen_cols.add(cname)
+            idx_str = sm.group("idx")
+            raw_calls.append(
+                (
+                    cname,
+                    sm.group("outer"),
+                    sm.group("sub"),
+                    int(idx_str) if idx_str is not None else None,
+                )
+            )
+        # Defer member-presence filtering to caller (needs header_infos).
+        calls = raw_calls
         if not calls:
-            skipped.append(SkippedImport(cls, path.name, line_no, "empty Import body"))
+            skipped.append(SkippedImport(cls, path.name, line_no, "no ImportField calls found"))
             continue
-        parsed.append(ParsedImport(cls, calls, path.name, line_no))
+        parsed.append(
+            ParsedImport(cls, [ImportCall(*c) for c in calls], path.name, line_no)
+        )
     return parsed, skipped, regs, db_regs
 
 
@@ -657,6 +677,63 @@ def main() -> int:
     for hi in header_infos:
         class_to_header.update(hi.class_to_header)
 
+    # Build a global merged class -> members map for membership tests.
+    # Note: a class may appear in multiple headers via fwd decls. Merge.
+    merged_members = {}  # cls -> set of member names
+    for hi in header_infos:
+        for cls, mems in hi.classes.items():
+            merged_members.setdefault(cls, set()).update(mems.keys())
+
+    # Walk the class hierarchy: a class that inherits from another can also
+    # call ImportField on the parent's members. Build a base-class map.
+    # The current header parser doesn't track inheritance; do a quick
+    # second-pass regex grep of the headers for `class X : ... public Y`.
+    CLASS_INHERIT_RE = re.compile(
+        r"\bclass\s+([A-Za-z_]\w*)\b\s*:\s*(?:public|protected|private)\s+([A-Za-z_:][\w:]*)",
+    )
+    base_classes = {}  # cls -> base cls (immediate)
+    for h in h_files:
+        try:
+            src_h = strip_comments(h.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        for m in CLASS_INHERIT_RE.finditer(src_h):
+            child = m.group(1)
+            base = m.group(2).rsplit("::", 1)[-1]
+            base_classes.setdefault(child, base)
+
+    def class_has_member(cls, name):
+        """Walk class + bases, return True if `name` is declared anywhere."""
+        cur = cls
+        seen = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            if name in merged_members.get(cur, ()):
+                return True
+            cur = base_classes.get(cur)
+        return False
+
+    def member_decl_type(cls, name):
+        """Return the recorded type spelling of `cls::name`, walking bases."""
+        cur = cls
+        seen = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            for hi in header_infos:
+                mems = hi.classes.get(cur)
+                if mems and name in mems:
+                    return mems[name]
+            cur = base_classes.get(cur)
+        return None
+
+    CONTAINER_RE = re.compile(r"^(?:const\s+)?(?:std::)?(vector|list|set|map|deque)\s*<")
+
+    def member_is_container(cls, name):
+        t = member_decl_type(cls, name)
+        if not t:
+            return False
+        return bool(CONTAINER_RE.match(t.strip()))
+
     all_parsed = []
     all_skipped = []
     all_regs = {}  # ClassName -> saveload typeID (int)
@@ -672,6 +749,26 @@ def main() -> int:
             all_regs.setdefault(cls, tid)
         for cls, info in db_regs.items():
             all_db_regs.setdefault(cls, info)
+
+    # r32: drop any ImportField whose outer identifier isn't a member of the
+    # owning class (or any base) — those are local-variable imports the
+    # game uses for scratch / unpack patterns (e.g. `string szFlags;
+    # ImportField("Flags", &szFlags); UnpackVariantFlags(szFlags,...)`).
+    # Also drop indexed access into vector/list members — offsetof can't
+    # reach inside a heap container.
+    dropped_local_count = 0
+    dropped_container_idx_count = 0
+    for p in all_parsed:
+        kept = []
+        for c in p.fields:
+            if not class_has_member(p.class_name, c.outer):
+                dropped_local_count += 1
+                continue
+            if c.idx is not None and member_is_container(p.class_name, c.outer):
+                dropped_container_idx_count += 1
+                continue
+            kept.append(c)
+        p.fields = kept
 
     # Emit the header.
     lines = []
@@ -720,7 +817,16 @@ def main() -> int:
             name_lit = f'"{call.colname}",'
             name_field_width = max_name_len + 3  # quotes + trailing comma
             name_lit_padded = name_lit.ljust(name_field_width)
-            offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
+            # r32: outer may include [idx] subscript. We bake the array index
+            # into the outer offset using a (char*)&p->outer[idx] - (char*)p
+            # cast — works because the result is constexpr-foldable for
+            # POD types and small literal indices.
+            if call.idx is not None:
+                offset_expr = (
+                    f"(int)((char*)&((NDb::{cls}*)1)->{call.outer}[{call.idx}] - (char*)1)"
+                )
+            else:
+                offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
             if call.sub is None:
                 sub_expr = "0"
             else:
@@ -839,6 +945,8 @@ def main() -> int:
     print(f"Wrote: {OUTPUT_PATH}")
     print(f"Classes parsed: {len(all_parsed)}")
     print(f"Total columns:  {total_cols}")
+    print(f"Dropped ImportFields (local var, not class member): {dropped_local_count}")
+    print(f"Dropped ImportFields (indexed access into vector/list): {dropped_container_idx_count}")
     print(f"Classes skipped: {len(all_skipped)}")
     for s in all_skipped:
         print(f"  - {s.class_name}  ({s.cpp_file}:{s.line_no})  {s.reason}")
