@@ -4,6 +4,16 @@
     "builtin-baseline": "d4db34445deb11168b595da1efd228df79a5f59d",
     "dependencies": [
         "sdl3",
-        "fmt"
+        "fmt",
+        {
+            "name": "ffmpeg",
+            "default-features": false,
+            "features": [
+                "avcodec",
+                "avformat",
+                "swscale",
+                "swresample"
+            ]
+        }
     ]
 }
