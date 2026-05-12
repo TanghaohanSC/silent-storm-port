@@ -84,6 +84,24 @@ All 12 Phase 1 tasks delivered as code AND visually verified at runtime through 
 
 **Round 5:** Resolution verification at 1080p/1440p/4K. See `docs/patches/p1_5_round5.md`.
 
+**Round 6 (`p1_5_r6_game_state.md`):** State-advance discovery. Mapped the
+`mainmenu / map / template / zone / chapter / global / load` REGISTER_CMD
+table; identified that the bundled `Versions/Current/start.cfg` chains
+through `sequence` → intro Biks → `mainmenu`, neither `sequence` nor `play`
+being registered in this code drop. `mainmenu` was found to crash inside
+`CRenderBaseInterface::Initialize`'s `CreateWorld` call, blocking advance.
+
+**Round 7 (`p1_5_r7_createworld_fix.md`):** Crash localized — not in
+`CreateWorld` itself but in `CreateGlobalPlayer` (`NDb::GetPers(54)`
+returns NULL because the shipped `Complete/game.db` is the Hammer&Sickle
+release DB without Jan03's hard-coded merc IDs) and in
+`CMainMenuInterface::Initialize` (`NDb::GetDBCamera(26)`, `GetUIContainer(347)`
+similarly absent). Null-guarded all three paths. `silent_storm.exe` now boots
+through intermission into the real main-menu state and runs stably (no
+crash, 28k+ bgfx frames over a 10-second smoke run). UI buttons + scene
+camera are still invisible because the data records are missing — but the
+state-machine transition itself is working.
+
 ## Acceptance checklist
 
 1. ✅ `cmake --build --preset msvc-debug` → exit 0

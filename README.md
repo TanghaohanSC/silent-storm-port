@@ -10,9 +10,10 @@ C++ wrapper `silent_storm::save::{save,load}_to_file` packs a flat
 `GameState` POD through the generated builder and writes a
 size-prefixed buffer to disk. Verified with the new `ss_save_test.exe`
 harness — in-memory round-trip, on-disk round-trip, garbage rejection,
-empty-state round-trip all pass. `silent_storm.exe` continues to boot
-into the Phase 1.5 intermission screen with the Phase 2 miniaudio
-backend live and the Phase 3 video player available as a sibling exe
+empty-state round-trip all pass. `silent_storm.exe` now boots **past** the Phase 1.5 intermission screen and
+into Nival's main-menu state (`CICMainMenu`) — main loop ticks stably with
+the Phase 2 miniaudio backend live and the Phase 3 video player available
+as a sibling exe
 (Phase 7, like Phase 3, is a pure addition — no existing call site is
 touched). See `docs/phase-7-completion.md` and `docs/patches/phase7.md`.
 Next: wire `save_to_file` / `load_from_file` into `iSaveManager::SaveSlot`
