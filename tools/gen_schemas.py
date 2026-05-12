@@ -911,27 +911,81 @@ def main() -> int:
     # record class (e.g. "CTexture"); we map that to the nTableID so dbfill
     # can call NDatabase::GetTable(targetID)->GetDBRecord(refID).
     lines.append("// ---------------------------------------------------------------------------")
-    lines.append("// Lookup: record class name -> nTableID (for type=5 ref resolution)")
+    lines.append("// Lookup: record class name -> list of candidate nTableIDs")
+    lines.append("// r33: when the ref target is an abstract base (e.g. CRPGItem), the actual")
+    lines.append("// record lives in one of N child tables (CRPGWeapon, CRPGGrenade, ...). The")
+    lines.append("// runtime tries each candidate in turn until it finds the right record ID.")
     lines.append("// ---------------------------------------------------------------------------")
     lines.append("")
-    lines.append("inline int GetTableIDForClassName(const char* name) {")
-    lines.append("    if (!name) return -1;")
-    lines.append("    struct E { const char* cls; int tid; };")
+    lines.append("struct STableCandidates { const int* ids; int count; };")
+    lines.append("inline STableCandidates GetTableIDsForClassName(const char* name) {")
+    lines.append("    static const int empty[1] = { -1 };")
+    lines.append("    if (!name) { STableCandidates r = { empty, 0 }; return r; }")
+    # Build child-of map: walk base_classes inverse.
+    children_of = {}
+    for child, base in base_classes.items():
+        children_of.setdefault(base, []).append(child)
+
+    def all_concrete_tables(cls, visited=None):
+        """All db-registered tables reachable from cls (incl. cls itself)."""
+        if visited is None:
+            visited = set()
+        if cls in visited:
+            return []
+        visited.add(cls)
+        out = []
+        if cls in all_db_regs:
+            out.append(all_db_regs[cls][0])
+        for child in children_of.get(cls, ()):
+            out.extend(all_concrete_tables(child, visited))
+        return out
+
+    # For every class that COULD be a ref target — anything in headers — emit
+    # the list of candidate nTableIDs. If empty, the runtime falls back to
+    # no-resolve.
+    candidate_lists = {}  # cls -> list[int]
+    for cls in sorted(merged_members.keys()):
+        cand = all_concrete_tables(cls)
+        if cand:
+            candidate_lists[cls] = cand
+    # Also include classes that didn't have members parsed but ARE registered.
+    for cls in all_db_regs:
+        if cls not in candidate_lists:
+            candidate_lists[cls] = [all_db_regs[cls][0]]
+    # Emit static arrays.
+    array_ids = {}
+    for cls, cand in sorted(candidate_lists.items()):
+        arr_name = f"_tids_{cls}"
+        array_ids[cls] = arr_name
+        lines.append(
+            f"static const int {arr_name}[] = {{ "
+            + ", ".join(f"0x{tid & 0xFFFFFFFF:08x}" for tid in cand)
+            + " };"
+        )
+    lines.append("")
+    lines.append("    struct E { const char* cls; const int* ids; int count; };")
     lines.append("    static const E entries[] = {")
-    # Emit ALL classes with REGISTER_DATABASE_CLASS, sorted by class name for
-    # determinism. Don't restrict to parsed_set — a CPtr may target a class
-    # whose Import body we couldn't parse, but the table still exists.
-    db_sorted = sorted(all_db_regs.items(), key=lambda kv: kv[0])
-    for cls, (tid, tname) in db_sorted:
-        lines.append(f'        {{ "{cls}", 0x{tid & 0xFFFFFFFF:08x} }},  // {tname}')
+    for cls, cand in sorted(candidate_lists.items()):
+        lines.append(
+            f'        {{ "{cls}", {array_ids[cls]}, {len(cand)} }},'
+        )
     lines.append("    };")
     lines.append("    for (size_t i = 0; i < sizeof(entries)/sizeof(entries[0]); ++i) {")
     lines.append("        const char* a = entries[i].cls;")
     lines.append("        const char* b = name;")
     lines.append("        while (*a && *a == *b) { ++a; ++b; }")
-    lines.append("        if (*a == 0 && *b == 0) return entries[i].tid;")
+    lines.append("        if (*a == 0 && *b == 0) {")
+    lines.append("            STableCandidates r = { entries[i].ids, entries[i].count };")
+    lines.append("            return r;")
+    lines.append("        }")
     lines.append("    }")
-    lines.append("    return -1;")
+    lines.append("    STableCandidates r = { empty, 0 }; return r;")
+    lines.append("}")
+    lines.append("")
+    # Back-compat: single-id lookup (returns first candidate).
+    lines.append("inline int GetTableIDForClassName(const char* name) {")
+    lines.append("    STableCandidates r = GetTableIDsForClassName(name);")
+    lines.append("    return r.count > 0 ? r.ids[0] : -1;")
     lines.append("}")
     lines.append("")
 

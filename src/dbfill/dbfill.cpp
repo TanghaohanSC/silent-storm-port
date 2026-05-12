@@ -151,11 +151,16 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
                     int refID = s->m_buckets[row][j];
                     if (refID <= 0) { break; }  // legitimate null ref
                     if (!c->refClass) { ++refsMissed; break; }
-                    int targetTableID = NDb::GetTableIDForClassName(c->refClass);
-                    if (targetTableID < 0) { ++refsMissed; break; }
-                    CDBTableBase* pTargetTable = NDatabase::GetTable(targetTableID);
-                    if (!pTargetTable) { ++refsMissed; break; }
-                    CDBRecord* pRefTarget = pTargetTable->GetDBRecord(refID);
+                    // r33: refClass may be an abstract base — try each of
+                    // its concrete subclass tables until we find refID.
+                    NDb::STableCandidates cands = NDb::GetTableIDsForClassName(c->refClass);
+                    CDBRecord* pRefTarget = 0;
+                    for (int k = 0; k < cands.count; ++k) {
+                        CDBTableBase* pTargetTable = NDatabase::GetTable(cands.ids[k]);
+                        if (!pTargetTable) continue;
+                        pRefTarget = pTargetTable->GetDBRecord(refID);
+                        if (pRefTarget) break;
+                    }
                     if (!pRefTarget) { ++refsMissed; break; }
                     // CPtr<T> stores a single raw pointer field; write through
                     // as a CDBRecord*. We skip refcount bumps — records live

@@ -1813,151 +1813,299 @@ inline const SSchemaEntry* GetAllSchemas(int* outCount) {
 }
 
 // ---------------------------------------------------------------------------
-// Lookup: record class name -> nTableID (for type=5 ref resolution)
+// Lookup: record class name -> list of candidate nTableIDs
+// r33: when the ref target is an abstract base (e.g. CRPGItem), the actual
+// record lives in one of N child tables (CRPGWeapon, CRPGGrenade, ...). The
+// runtime tries each candidate in turn until it finds the right record ID.
 // ---------------------------------------------------------------------------
 
-inline int GetTableIDForClassName(const char* name) {
-    if (!name) return -1;
-    struct E { const char* cls; int tid; };
+struct STableCandidates { const int* ids; int count; };
+inline STableCandidates GetTableIDsForClassName(const char* name) {
+    static const int empty[1] = { -1 };
+    if (!name) { STableCandidates r = { empty, 0 }; return r; }
+static const int _tids_CAIGeometry[] = { 0x00000014 };
+static const int _tids_CAISound[] = { 0x00000034 };
+static const int _tids_CAmbientLight[] = { 0x0000001d };
+static const int _tids_CAnimLight[] = { 0x0000004a };
+static const int _tids_CAnimWeaponType[] = { 0x00000043 };
+static const int _tids_CAnimation[] = { 0x00000002 };
+static const int _tids_CAttribute[] = { 0x00000023 };
+static const int _tids_CBRDF[] = { 0x00000008 };
+static const int _tids_CChapterMap[] = { 0x0000000f };
+static const int _tids_CComplexHead[] = { 0x0000004b };
+static const int _tids_CContainer[] = { 0x0000001c };
+static const int _tids_CCubeTexture[] = { 0x00000035 };
+static const int _tids_CDBAck[] = { 0x00000038 };
+static const int _tids_CDBAckInfo[] = { 0x00000036 };
+static const int _tids_CDBAckSequence[] = { 0x00000037 };
+static const int _tids_CDBAutoLoadScript[] = { 0x0000005b };
+static const int _tids_CDBCamera[] = { 0x00000058 };
+static const int _tids_CDBDialog[] = { 0x00000061 };
+static const int _tids_CDBDialogPers[] = { 0x00000068 };
+static const int _tids_CDBDialogSeq[] = { 0x00000067 };
+static const int _tids_CDBDifficulty[] = { 0x00000062 };
+static const int _tids_CDBDiplomacy[] = { 0x00000063 };
+static const int _tids_CDBMinesConstants[] = { 0x00000069 };
+static const int _tids_CDBPerk[] = { 0x00000065 };
+static const int _tids_CDBPerkTreeNode[] = { 0x00000066 };
+static const int _tids_CDBScenario[] = { 0x00000053 };
+static const int _tids_CDBScenarioClue[] = { 0x00000051 };
+static const int _tids_CDBScenarioObjective[] = { 0x00000052 };
+static const int _tids_CDBScenarioObjective2Clue[] = { 0x00000054 };
+static const int _tids_CDBScenarioState[] = { 0x00000050 };
+static const int _tids_CDBScenarioZone[] = { 0x0000004f };
+static const int _tids_CDebris[] = { 0x00000027 };
+static const int _tids_CDebrisMaterial[] = { 0x00000026 };
+static const int _tids_CDoor[] = { 0x0000003d };
+static const int _tids_CEffect[] = { 0x00000041 };
+static const int _tids_CExplosion[] = { 0x0000002a };
+static const int _tids_CFinalElement[] = { 0x00000007 };
+static const int _tids_CFloor[] = { 0x00000018, 0x00000022 };
+static const int _tids_CFloorModel[] = { 0x00000016 };
+static const int _tids_CGeometry[] = { 0x0000000a };
+static const int _tids_CGlobalMap[] = { 0x00000010 };
+static const int _tids_CGrass[] = { 0x00000030 };
+static const int _tids_CGun[] = { 0x0000003e };
+static const int _tids_CHead[] = { 0x00000045 };
+static const int _tids_CIntermediateFloor[] = { 0x00000022 };
+static const int _tids_CIntermediateSolid[] = { 0x00000024 };
+static const int _tids_CLightInstance[] = { 0x00000049 };
+static const int _tids_CMaterial[] = { 0x00000009 };
+static const int _tids_CMusic[] = { 0x0000004c };
+static const int _tids_CNationality[] = { 0x00000060 };
+static const int _tids_CPanzerklein[] = { 0x00000057 };
+static const int _tids_CParticle[] = { 0x00000019 };
+static const int _tids_CParticleInstance[] = { 0x00000040 };
+static const int _tids_CPassageObject[] = { 0x00000056 };
+static const int _tids_CPlacableObject[] = { 0x0000004d };
+static const int _tids_CRPGAISoundConstants[] = { 0x00000044 };
+static const int _tids_CRPGAmmo[] = { 0xe0000006 };
+static const int _tids_CRPGArmor[] = { 0xe0000005 };
+static const int _tids_CRPGBaseValue[] = { 0xe0000007 };
+static const int _tids_CRPGClass[] = { 0xe0000003 };
+static const int _tids_CRPGClip[] = { 0xe0000008 };
+static const int _tids_CRPGClip4Pers[] = { 0xe000000b };
+static const int _tids_CRPGCritical[] = { 0x00000033 };
+static const int _tids_CRPGDmgToArmor[] = { 0x00000048 };
+static const int _tids_CRPGFirstAid[] = { 0xe0000012 };
+static const int _tids_CRPGFirstAid4Pers[] = { 0xe0000013 };
+static const int _tids_CRPGGrenade[] = { 0xe000000d };
+static const int _tids_CRPGGrenade4Pers[] = { 0xe000000f };
+static const int _tids_CRPGInterruptsConstants[] = { 0x00000047 };
+static const int _tids_CRPGItem[] = { 0xe0000009 };
+static const int _tids_CRPGItem2Uniform[] = { 0xe0000010 };
+static const int _tids_CRPGKey[] = { 0xe0000023 };
+static const int _tids_CRPGKey4Pers[] = { 0xe0000024 };
+static const int _tids_CRPGLink4Pers[] = { 0xe000000b };
+static const int _tids_CRPGMaterial[] = { 0x0000005a };
+static const int _tids_CRPGMeleeWeapon[] = { 0xe0000014 };
+static const int _tids_CRPGMeleeWeapon4Pers[] = { 0xe0000015 };
+static const int _tids_CRPGMine[] = { 0xe0000019 };
+static const int _tids_CRPGMine4Pers[] = { 0xe0000020 };
+static const int _tids_CRPGMineDetector[] = { 0xe0000016 };
+static const int _tids_CRPGMineDetector4Pers[] = { 0xe0000017 };
+static const int _tids_CRPGPers[] = { 0xe0000004 };
+static const int _tids_CRPGStoreItem[] = { 0xe0000018 };
+static const int _tids_CRPGToHit[] = { 0x0000003b };
+static const int _tids_CRPGTool[] = { 0xe0000021 };
+static const int _tids_CRPGTool4Pers[] = { 0xe0000022 };
+static const int _tids_CRPGUniform[] = { 0xe000000e };
+static const int _tids_CRPGWeapon[] = { 0xe0000002 };
+static const int _tids_CRPGWeapon4Pers[] = { 0xe000000a };
+static const int _tids_CRPGWeaponType[] = { 0xe0000001 };
+static const int _tids_CRectangle[] = { 0x00000006 };
+static const int _tids_CRndConstructionPart[] = { 0x0000002f };
+static const int _tids_CRndContainerModel[] = { 0x00000021 };
+static const int _tids_CRndModel[] = { 0x00000001 };
+static const int _tids_CRndObject[] = { 0x00000028 };
+static const int _tids_CRndPtr[] = { 0x0000001f, 0x00000020, 0x00000042, 0x0000005c, 0x00000004, 0x0000002e, 0x00000029, 0x0000003a };
+static const int _tids_CRndTerrainSpot[] = { 0x00000032 };
+static const int _tids_CRoom[] = { 0x0000001e };
+static const int _tids_CScript[] = { 0xe000000c };
+static const int _tids_CSequence[] = { 0x00000046 };
+static const int _tids_CSide[] = { 0x0000005f };
+static const int _tids_CSkeleton[] = { 0x0000000d };
+static const int _tids_CSolid[] = { 0x0000001b, 0x00000024 };
+static const int _tids_CSolidModel[] = { 0x0000001a };
+static const int _tids_CSound[] = { 0x00000025 };
+static const int _tids_CSoundEffect[] = { 0x0000005e };
+static const int _tids_CSoundInstance[] = { 0x0000005d };
+static const int _tids_CSoundVariant[] = { 0x00000039 };
+static const int _tids_CSpot[] = { 0x0000004e };
+static const int _tids_CString[] = { 0x0000002d };
+static const int _tids_CTAmbientLight[] = { 0x0000005c };
+static const int _tids_CTConstructionPart[] = { 0x0000002e };
+static const int _tids_CTEffect[] = { 0x00000042 };
+static const int _tids_CTMaterial[] = { 0x0000001f };
+static const int _tids_CTRndModel[] = { 0x00000020 };
+static const int _tids_CTRndObject[] = { 0x00000029 };
+static const int _tids_CTSound[] = { 0x0000003a };
+static const int _tids_CTemplVariant[] = { 0x00000005 };
+static const int _tids_CTemplate[] = { 0x00000004 };
+static const int _tids_CTerrainTile[] = { 0x0000000e };
+static const int _tids_CTexture[] = { 0x00000003 };
+static const int _tids_CTranslatedString[] = { 0x00000064 };
+static const int _tids_CTypeface[] = { 0x0000000c };
+static const int _tids_CUIContainer[] = { 0x0000002c };
+static const int _tids_CUIControl[] = { 0x0000002b };
+static const int _tids_CUITexture[] = { 0x00000031 };
+static const int _tids_CUnit[] = { 0x0000000b };
+static const int _tids_CUnitGroup[] = { 0x00000059 };
+static const int _tids_CWall[] = { 0x00000017 };
+static const int _tids_CWallModel[] = { 0x00000015 };
+static const int _tids_CWaypoint[] = { 0x0000003c };
+static const int _tids_CWaypointName[] = { 0x0000003f };
+
+    struct E { const char* cls; const int* ids; int count; };
     static const E entries[] = {
-        { "CAIGeometry", 0x00000014 },  // AIGeometries
-        { "CAISound", 0x00000034 },  // AISounds
-        { "CAmbientLight", 0x0000001d },  // AmbientLights
-        { "CAnimLight", 0x0000004a },  // Lights
-        { "CAnimWeaponType", 0x00000043 },  // AnimWeaponTypes
-        { "CAnimation", 0x00000002 },  // Animations
-        { "CAttribute", 0x00000023 },  // Attributes
-        { "CBRDF", 0x00000008 },  // BRDFs
-        { "CChapterMap", 0x0000000f },  // ChapterMaps
-        { "CComplexHead", 0x0000004b },  // ComplexHeads
-        { "CContainer", 0x0000001c },  // Containers
-        { "CCubeTexture", 0x00000035 },  // CubeTextures
-        { "CDBAck", 0x00000038 },  // Acks
-        { "CDBAckInfo", 0x00000036 },  // AckInfos
-        { "CDBAckSequence", 0x00000037 },  // AckSeqs
-        { "CDBAutoLoadScript", 0x0000005b },  // AutoLoadScripts
-        { "CDBCamera", 0x00000058 },  // Cameras
-        { "CDBDialog", 0x00000061 },  // Dialogs
-        { "CDBDialogPers", 0x00000068 },  // DialogPers
-        { "CDBDialogSeq", 0x00000067 },  // DialogSeqs
-        { "CDBDifficulty", 0x00000062 },  // DifficultyConstants
-        { "CDBDiplomacy", 0x00000063 },  // Diplomacies
-        { "CDBMinesConstants", 0x00000069 },  // RPGMinesConstants
-        { "CDBPerk", 0x00000065 },  // RPGPerks
-        { "CDBPerkTreeNode", 0x00000066 },  // RPGPerkTreeNodes
-        { "CDBScenario", 0x00000053 },  // Scenarios
-        { "CDBScenarioClue", 0x00000051 },  // ScenarioClues
-        { "CDBScenarioObjective", 0x00000052 },  // ScenarioObjectives
-        { "CDBScenarioObjective2Clue", 0x00000054 },  // ScenarioObjective2Clues
-        { "CDBScenarioState", 0x00000050 },  // ScenarioStates
-        { "CDBScenarioZone", 0x0000004f },  // ScenarioZones
-        { "CDebris", 0x00000027 },  // Debris
-        { "CDebrisMaterial", 0x00000026 },  // DebrisMaterials
-        { "CDoor", 0x0000003d },  // Doors
-        { "CEffect", 0x00000041 },  // Effects
-        { "CExplosion", 0x0000002a },  // Explosions
-        { "CFinalElement", 0x00000007 },  // FinalElements
-        { "CFloor", 0x00000018 },  // Floors
-        { "CFloorModel", 0x00000016 },  // FloorModels
-        { "CGeometry", 0x0000000a },  // Geometries
-        { "CGlobalMap", 0x00000010 },  // GlobalMaps
-        { "CGrass", 0x00000030 },  // Grass
-        { "CGun", 0x0000003e },  // Guns
-        { "CHead", 0x00000045 },  // Heads
-        { "CIntermediateFloor", 0x00000022 },  // IntermediateFloors
-        { "CIntermediateSolid", 0x00000024 },  // IntermediateSolids
-        { "CLightInstance", 0x00000049 },  // LightInstances
-        { "CMaterial", 0x00000009 },  // Materials
-        { "CMusic", 0x0000004c },  // Musics
-        { "CNationality", 0x00000060 },  // Nationalities
-        { "CPanzerklein", 0x00000057 },  // Panzerkleins
-        { "CParticle", 0x00000019 },  // Particles
-        { "CParticleInstance", 0x00000040 },  // ParticleInstances
-        { "CPassageObject", 0x00000056 },  // PassageObjects
-        { "CPlacableObject", 0x0000004d },  // PlacableObjects
-        { "CRPGAISoundConstants", 0x00000044 },  // AISoundConstants
-        { "CRPGAmmo", 0xe0000006 },  // RPGAmmos
-        { "CRPGArmor", 0xe0000005 },  // RPGArmors
-        { "CRPGBaseValue", 0xe0000007 },  // RPGBaseValues
-        { "CRPGClass", 0xe0000003 },  // RPGClasses
-        { "CRPGClip", 0xe0000008 },  // RPGClips
-        { "CRPGClip4Pers", 0xe000000b },  // RPGClip4Pers
-        { "CRPGCritical", 0x00000033 },  // RPGCriticals
-        { "CRPGDmgToArmor", 0x00000048 },  // RPGDmgToArmors
-        { "CRPGFirstAid", 0xe0000012 },  // RPGFirstAids
-        { "CRPGFirstAid4Pers", 0xe0000013 },  // RPGFirstAid4Pers
-        { "CRPGGrenade", 0xe000000d },  // RPGGrenades
-        { "CRPGGrenade4Pers", 0xe000000f },  // RPGGrenade4Pers
-        { "CRPGInterruptsConstants", 0x00000047 },  // InterruptsConstants
-        { "CRPGItem", 0xe0000009 },  // RPGItems
-        { "CRPGItem2Uniform", 0xe0000010 },  // RPGItem2Uniforms
-        { "CRPGKey", 0xe0000023 },  // RPGKeys
-        { "CRPGKey4Pers", 0xe0000024 },  // RPGKey4Pers
-        { "CRPGMaterial", 0x0000005a },  // RPGMaterials
-        { "CRPGMeleeWeapon", 0xe0000014 },  // RPGMeleeWeapons
-        { "CRPGMeleeWeapon4Pers", 0xe0000015 },  // RPGMeleeWeapon4Pers
-        { "CRPGMine", 0xe0000019 },  // RPGMines
-        { "CRPGMine4Pers", 0xe0000020 },  // RPGMines4Pers
-        { "CRPGMineDetector", 0xe0000016 },  // RPGMineDetectors
-        { "CRPGMineDetector4Pers", 0xe0000017 },  // RPGMineDetector4Pers
-        { "CRPGPers", 0xe0000004 },  // RPGPers
-        { "CRPGStoreItem", 0xe0000018 },  // RPGStoreItems
-        { "CRPGToHit", 0x0000003b },  // RPGToHits
-        { "CRPGTool", 0xe0000021 },  // RPGTools
-        { "CRPGTool4Pers", 0xe0000022 },  // RPGTool4Pers
-        { "CRPGUniform", 0xe000000e },  // RPGUniforms
-        { "CRPGWeapon", 0xe0000002 },  // RPGWeapons
-        { "CRPGWeapon4Pers", 0xe000000a },  // RPGWeapon4Pers
-        { "CRPGWeaponType", 0xe0000001 },  // RPGWeaponTypes
-        { "CRectangle", 0x00000006 },  // Rects
-        { "CRndConstructionPart", 0x0000002f },  // ConstructionParts
-        { "CRndContainerModel", 0x00000021 },  // ContainerModels
-        { "CRndModel", 0x00000001 },  // Models
-        { "CRndObject", 0x00000028 },  // Objects
-        { "CRndTerrainSpot", 0x00000032 },  // TerrainSpots
-        { "CRoom", 0x0000001e },  // Rooms
-        { "CScript", 0xe000000c },  // Scripts
-        { "CSequence", 0x00000046 },  // HeadSeqs
-        { "CSide", 0x0000005f },  // Sides
-        { "CSkeleton", 0x0000000d },  // Skeletons
-        { "CSolid", 0x0000001b },  // SolidObjects
-        { "CSolidModel", 0x0000001a },  // SolidModels
-        { "CSound", 0x00000025 },  // Sounds
-        { "CSoundEffect", 0x0000005e },  // SoundEffects
-        { "CSoundInstance", 0x0000005d },  // SoundInstances
-        { "CSoundVariant", 0x00000039 },  // SoundVariants
-        { "CSpot", 0x0000004e },  // Spots
-        { "CString", 0x0000002d },  // Strings
-        { "CTAmbientLight", 0x0000005c },  // AmbientLightTemplates
-        { "CTConstructionPart", 0x0000002e },  // ConstructionPartTemplates
-        { "CTEffect", 0x00000042 },  // EffectTemplates
-        { "CTMaterial", 0x0000001f },  // MaterialTemplates
-        { "CTRndModel", 0x00000020 },  // ModelTemplates
-        { "CTRndObject", 0x00000029 },  // ObjectTemplates
-        { "CTSound", 0x0000003a },  // SoundTemplates
-        { "CTemplVariant", 0x00000005 },  // TemplVariants
-        { "CTemplate", 0x00000004 },  // Templates
-        { "CTerrainTile", 0x0000000e },  // TerrainTiles
-        { "CTexture", 0x00000003 },  // Textures
-        { "CTranslatedString", 0x00000064 },  // TranslatedStrings
-        { "CTypeface", 0x0000000c },  // Fonts
-        { "CUIContainer", 0x0000002c },  // UIContainers
-        { "CUIControl", 0x0000002b },  // UIControls
-        { "CUITexture", 0x00000031 },  // UITextures
-        { "CUnit", 0x0000000b },  // Units
-        { "CUnitGroup", 0x00000059 },  // UnitGroups
-        { "CWall", 0x00000017 },  // Walls
-        { "CWallModel", 0x00000015 },  // WallModels
-        { "CWaypoint", 0x0000003c },  // Waypoints
-        { "CWaypointName", 0x0000003f },  // WaypointNames
+        { "CAIGeometry", _tids_CAIGeometry, 1 },
+        { "CAISound", _tids_CAISound, 1 },
+        { "CAmbientLight", _tids_CAmbientLight, 1 },
+        { "CAnimLight", _tids_CAnimLight, 1 },
+        { "CAnimWeaponType", _tids_CAnimWeaponType, 1 },
+        { "CAnimation", _tids_CAnimation, 1 },
+        { "CAttribute", _tids_CAttribute, 1 },
+        { "CBRDF", _tids_CBRDF, 1 },
+        { "CChapterMap", _tids_CChapterMap, 1 },
+        { "CComplexHead", _tids_CComplexHead, 1 },
+        { "CContainer", _tids_CContainer, 1 },
+        { "CCubeTexture", _tids_CCubeTexture, 1 },
+        { "CDBAck", _tids_CDBAck, 1 },
+        { "CDBAckInfo", _tids_CDBAckInfo, 1 },
+        { "CDBAckSequence", _tids_CDBAckSequence, 1 },
+        { "CDBAutoLoadScript", _tids_CDBAutoLoadScript, 1 },
+        { "CDBCamera", _tids_CDBCamera, 1 },
+        { "CDBDialog", _tids_CDBDialog, 1 },
+        { "CDBDialogPers", _tids_CDBDialogPers, 1 },
+        { "CDBDialogSeq", _tids_CDBDialogSeq, 1 },
+        { "CDBDifficulty", _tids_CDBDifficulty, 1 },
+        { "CDBDiplomacy", _tids_CDBDiplomacy, 1 },
+        { "CDBMinesConstants", _tids_CDBMinesConstants, 1 },
+        { "CDBPerk", _tids_CDBPerk, 1 },
+        { "CDBPerkTreeNode", _tids_CDBPerkTreeNode, 1 },
+        { "CDBScenario", _tids_CDBScenario, 1 },
+        { "CDBScenarioClue", _tids_CDBScenarioClue, 1 },
+        { "CDBScenarioObjective", _tids_CDBScenarioObjective, 1 },
+        { "CDBScenarioObjective2Clue", _tids_CDBScenarioObjective2Clue, 1 },
+        { "CDBScenarioState", _tids_CDBScenarioState, 1 },
+        { "CDBScenarioZone", _tids_CDBScenarioZone, 1 },
+        { "CDebris", _tids_CDebris, 1 },
+        { "CDebrisMaterial", _tids_CDebrisMaterial, 1 },
+        { "CDoor", _tids_CDoor, 1 },
+        { "CEffect", _tids_CEffect, 1 },
+        { "CExplosion", _tids_CExplosion, 1 },
+        { "CFinalElement", _tids_CFinalElement, 1 },
+        { "CFloor", _tids_CFloor, 2 },
+        { "CFloorModel", _tids_CFloorModel, 1 },
+        { "CGeometry", _tids_CGeometry, 1 },
+        { "CGlobalMap", _tids_CGlobalMap, 1 },
+        { "CGrass", _tids_CGrass, 1 },
+        { "CGun", _tids_CGun, 1 },
+        { "CHead", _tids_CHead, 1 },
+        { "CIntermediateFloor", _tids_CIntermediateFloor, 1 },
+        { "CIntermediateSolid", _tids_CIntermediateSolid, 1 },
+        { "CLightInstance", _tids_CLightInstance, 1 },
+        { "CMaterial", _tids_CMaterial, 1 },
+        { "CMusic", _tids_CMusic, 1 },
+        { "CNationality", _tids_CNationality, 1 },
+        { "CPanzerklein", _tids_CPanzerklein, 1 },
+        { "CParticle", _tids_CParticle, 1 },
+        { "CParticleInstance", _tids_CParticleInstance, 1 },
+        { "CPassageObject", _tids_CPassageObject, 1 },
+        { "CPlacableObject", _tids_CPlacableObject, 1 },
+        { "CRPGAISoundConstants", _tids_CRPGAISoundConstants, 1 },
+        { "CRPGAmmo", _tids_CRPGAmmo, 1 },
+        { "CRPGArmor", _tids_CRPGArmor, 1 },
+        { "CRPGBaseValue", _tids_CRPGBaseValue, 1 },
+        { "CRPGClass", _tids_CRPGClass, 1 },
+        { "CRPGClip", _tids_CRPGClip, 1 },
+        { "CRPGClip4Pers", _tids_CRPGClip4Pers, 1 },
+        { "CRPGCritical", _tids_CRPGCritical, 1 },
+        { "CRPGDmgToArmor", _tids_CRPGDmgToArmor, 1 },
+        { "CRPGFirstAid", _tids_CRPGFirstAid, 1 },
+        { "CRPGFirstAid4Pers", _tids_CRPGFirstAid4Pers, 1 },
+        { "CRPGGrenade", _tids_CRPGGrenade, 1 },
+        { "CRPGGrenade4Pers", _tids_CRPGGrenade4Pers, 1 },
+        { "CRPGInterruptsConstants", _tids_CRPGInterruptsConstants, 1 },
+        { "CRPGItem", _tids_CRPGItem, 1 },
+        { "CRPGItem2Uniform", _tids_CRPGItem2Uniform, 1 },
+        { "CRPGKey", _tids_CRPGKey, 1 },
+        { "CRPGKey4Pers", _tids_CRPGKey4Pers, 1 },
+        { "CRPGLink4Pers", _tids_CRPGLink4Pers, 1 },
+        { "CRPGMaterial", _tids_CRPGMaterial, 1 },
+        { "CRPGMeleeWeapon", _tids_CRPGMeleeWeapon, 1 },
+        { "CRPGMeleeWeapon4Pers", _tids_CRPGMeleeWeapon4Pers, 1 },
+        { "CRPGMine", _tids_CRPGMine, 1 },
+        { "CRPGMine4Pers", _tids_CRPGMine4Pers, 1 },
+        { "CRPGMineDetector", _tids_CRPGMineDetector, 1 },
+        { "CRPGMineDetector4Pers", _tids_CRPGMineDetector4Pers, 1 },
+        { "CRPGPers", _tids_CRPGPers, 1 },
+        { "CRPGStoreItem", _tids_CRPGStoreItem, 1 },
+        { "CRPGToHit", _tids_CRPGToHit, 1 },
+        { "CRPGTool", _tids_CRPGTool, 1 },
+        { "CRPGTool4Pers", _tids_CRPGTool4Pers, 1 },
+        { "CRPGUniform", _tids_CRPGUniform, 1 },
+        { "CRPGWeapon", _tids_CRPGWeapon, 1 },
+        { "CRPGWeapon4Pers", _tids_CRPGWeapon4Pers, 1 },
+        { "CRPGWeaponType", _tids_CRPGWeaponType, 1 },
+        { "CRectangle", _tids_CRectangle, 1 },
+        { "CRndConstructionPart", _tids_CRndConstructionPart, 1 },
+        { "CRndContainerModel", _tids_CRndContainerModel, 1 },
+        { "CRndModel", _tids_CRndModel, 1 },
+        { "CRndObject", _tids_CRndObject, 1 },
+        { "CRndPtr", _tids_CRndPtr, 8 },
+        { "CRndTerrainSpot", _tids_CRndTerrainSpot, 1 },
+        { "CRoom", _tids_CRoom, 1 },
+        { "CScript", _tids_CScript, 1 },
+        { "CSequence", _tids_CSequence, 1 },
+        { "CSide", _tids_CSide, 1 },
+        { "CSkeleton", _tids_CSkeleton, 1 },
+        { "CSolid", _tids_CSolid, 2 },
+        { "CSolidModel", _tids_CSolidModel, 1 },
+        { "CSound", _tids_CSound, 1 },
+        { "CSoundEffect", _tids_CSoundEffect, 1 },
+        { "CSoundInstance", _tids_CSoundInstance, 1 },
+        { "CSoundVariant", _tids_CSoundVariant, 1 },
+        { "CSpot", _tids_CSpot, 1 },
+        { "CString", _tids_CString, 1 },
+        { "CTAmbientLight", _tids_CTAmbientLight, 1 },
+        { "CTConstructionPart", _tids_CTConstructionPart, 1 },
+        { "CTEffect", _tids_CTEffect, 1 },
+        { "CTMaterial", _tids_CTMaterial, 1 },
+        { "CTRndModel", _tids_CTRndModel, 1 },
+        { "CTRndObject", _tids_CTRndObject, 1 },
+        { "CTSound", _tids_CTSound, 1 },
+        { "CTemplVariant", _tids_CTemplVariant, 1 },
+        { "CTemplate", _tids_CTemplate, 1 },
+        { "CTerrainTile", _tids_CTerrainTile, 1 },
+        { "CTexture", _tids_CTexture, 1 },
+        { "CTranslatedString", _tids_CTranslatedString, 1 },
+        { "CTypeface", _tids_CTypeface, 1 },
+        { "CUIContainer", _tids_CUIContainer, 1 },
+        { "CUIControl", _tids_CUIControl, 1 },
+        { "CUITexture", _tids_CUITexture, 1 },
+        { "CUnit", _tids_CUnit, 1 },
+        { "CUnitGroup", _tids_CUnitGroup, 1 },
+        { "CWall", _tids_CWall, 1 },
+        { "CWallModel", _tids_CWallModel, 1 },
+        { "CWaypoint", _tids_CWaypoint, 1 },
+        { "CWaypointName", _tids_CWaypointName, 1 },
     };
     for (size_t i = 0; i < sizeof(entries)/sizeof(entries[0]); ++i) {
         const char* a = entries[i].cls;
         const char* b = name;
         while (*a && *a == *b) { ++a; ++b; }
-        if (*a == 0 && *b == 0) return entries[i].tid;
+        if (*a == 0 && *b == 0) {
+            STableCandidates r = { entries[i].ids, entries[i].count };
+            return r;
+        }
     }
-    return -1;
+    STableCandidates r = { empty, 0 }; return r;
+}
+
+inline int GetTableIDForClassName(const char* name) {
+    STableCandidates r = GetTableIDsForClassName(name);
+    return r.count > 0 ? r.ids[0] : -1;
 }
 
 } // namespace NDb
