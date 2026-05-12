@@ -68,3 +68,11 @@ See `docs/patches/main-game.md` for the full per-file patch list. Summary:
 - `MemoryMngr/DumbPow2Alloc.cpp` switches from MemoryMngrDll's FastDumbAlloc to stdlib malloc/free.
 - `Main/Interface.cpp` excises dead `CMouseCaptureHandler` referencing nonexistent IWindow/IInterface.
 - `port/third_party/stlport_shim/legacy_compat.h` includes `<../ucrt/time.h>` to bypass Main/Time.h shadow.
+
+---
+
+## 2026-05-12 — r31 main-menu null-guard suite (boot reaches steady state)
+
+- `Main/iRenderWorld.cpp` null-guards in CRenderBaseInterface::OnGetFocus / ProcessEvent / Step. When MainMenuInterface skips parent::Initialize (DB cameras/world missing), pRender / pRenderSound / pCursor / pInterface / pCamera / pScene stay null. Each was being unconditionally dereferenced, triggering a `dynamic_cast` SEGV deep inside CastToUserObjectImpl (the EAX=0 vtable read seen in r30).
+- `Main/iMain.cpp` finer trace points (StepApp.5 input handled / .6 LoadPrecached ok / .7 Step ok).
+- Result: game reaches main-loop steady state — `22.N.c StepApp ret=1` for arbitrary N, no crash, fallback main menu painted via `ss_r8_render_fallback_menu`. This is the OpenMW-style "main menu boots and stays up" milestone.
