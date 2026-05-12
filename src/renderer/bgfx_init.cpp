@@ -44,6 +44,20 @@ int g_height    = 0;
 int g_hud_scale = 1;  // T11: updated by D3D9Facade::SetTransform when ortho detected
 } // namespace
 
+// ----- Phase 1.5 r3 — debug text relay -----
+// Lives at silent_storm::renderer namespace scope (not anonymous) so the
+// extern "C" entry points further down in this file can reference them by
+// fully-qualified name.
+struct DbgTextEntry {
+    int x, y;
+    uint8_t attr;
+    char text[96];
+};
+constexpr int kDbgTextCap = 32;
+DbgTextEntry g_dbg_text[kDbgTextCap];
+int g_dbg_text_count = 0;
+char g_dbg_text_banner[160] = {};
+
 int get_width()     { return g_width; }
 int get_height()    { return g_height; }
 int get_hud_scale() { return g_hud_scale; }
@@ -121,20 +135,44 @@ void begin_frame() {
 }
 
 void end_frame() {
-    // Phase 1.5 r2 iter 4: paint a status bar via bgfx debug text overlay
-    // so we have a visible signal that the renderer is alive, independent
-    // of Nival's draw path.  Removed in Phase 2 once UI textures bind.
+    // Phase 1.5 r3: paint a status bar AND flush the upstream debug-text
+    // relay (CTextDraw → ss_dbg_text_push) via bgfx::dbgTextPrintf.  This
+    // makes Nival's text strings VISIBLE on screen even before the font
+    // atlas binding lands.
     static uint64_t s_frame = 0;
     ++s_frame;
     bgfx::dbgTextClear();
-    bgfx::dbgTextPrintf(2, 1, 0x0f,
-        "Silent Storm port  -  Phase 1.5 r2  -  bgfx alive, frame %llu",
+    bgfx::dbgTextPrintf(2, 0, 0x0f,
+        "Silent Storm port  -  Phase 1.5 r3  -  bgfx alive, frame %llu",
         (unsigned long long)s_frame);
-    bgfx::dbgTextPrintf(2, 2, 0x1f,
-        "Backend %d  Window %d x %d  HUD scale %d",
-        (int)bgfx::getRendererType(), g_width, g_height, g_hud_scale);
-    bgfx::dbgTextPrintf(2, 3, 0x4f,
-        "Renderer status: pipeline OK   shaders loaded   facade installed");
+    bgfx::dbgTextPrintf(2, 1, 0x1f,
+        "Backend %d  Window %d x %d  HUD scale %d  text-relay entries=%d",
+        (int)bgfx::getRendererType(), g_width, g_height, g_hud_scale,
+        g_dbg_text_count);
+    if (g_dbg_text_banner[0])
+        bgfx::dbgTextPrintf(2, 2, 0x2f, "%s", g_dbg_text_banner);
+
+    // Flush queued upstream debug-text entries.  Coords come in 1024x768
+    // virtual space; bgfx dbg text uses ~80 cols × ~24 rows.
+    // Track which (row,col) cells have been written this frame so successive
+    // entries with the same virtual position don't overprint each other.
+    uint8_t cell_used[24] = {};
+    for (int i = 0; i < g_dbg_text_count; ++i) {
+        const auto& e = g_dbg_text[i];
+        int col = (e.x * 80) / 1024;
+        int row = 3 + (e.y * 19) / 768;   // rows 3..21 are usable
+        if (col < 0)  col = 0;
+        if (col > 78) col = 78;
+        if (row < 3)  row = 3;
+        if (row > 21) row = 21;
+        // Bump down until we find an unused row (don't overwrite previous lines).
+        while (row < 22 && cell_used[row]) ++row;
+        if (row > 21) row = 22;
+        cell_used[row] = 1;
+        bgfx::dbgTextPrintf(col, row, e.attr ? e.attr : 0x0f, "%s", e.text);
+    }
+    g_dbg_text_count = 0;
+
     bgfx::frame();
 }
 
@@ -155,5 +193,32 @@ extern "C" bool ss_renderer_bootstrap(void* hwnd, int width, int height,
 
 extern "C" bool ss_renderer_load_shaders(const char* shader_dir) {
     return silent_storm::renderer::load_all_archetypes(shader_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1.5 r3 — debug text relay C entry points (called from STLport side)
+// ---------------------------------------------------------------------------
+extern "C" void ss_dbg_text_push(int virtX, int virtY, unsigned attr, const char* text) {
+    if (!text) return;
+    int idx = silent_storm::renderer::g_dbg_text_count;
+    if (idx >= silent_storm::renderer::kDbgTextCap) return;
+    auto& e = silent_storm::renderer::g_dbg_text[idx];
+    e.x    = virtX;
+    e.y    = virtY;
+    e.attr = static_cast<uint8_t>(attr & 0xff);
+    int n = 0;
+    while (n < (int)sizeof(e.text) - 1 && text[n]) { e.text[n] = text[n]; ++n; }
+    e.text[n] = '\0';
+    ++silent_storm::renderer::g_dbg_text_count;
+}
+
+extern "C" void ss_dbg_text_banner(const char* text) {
+    if (!text) { silent_storm::renderer::g_dbg_text_banner[0] = '\0'; return; }
+    int n = 0;
+    while (n < (int)sizeof(silent_storm::renderer::g_dbg_text_banner) - 1 && text[n]) {
+        silent_storm::renderer::g_dbg_text_banner[n] = text[n];
+        ++n;
+    }
+    silent_storm::renderer::g_dbg_text_banner[n] = '\0';
 }
 

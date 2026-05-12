@@ -40,3 +40,24 @@ void begin_frame();
 void end_frame();
 
 } // namespace silent_storm::renderer
+
+// ---------------------------------------------------------------------------
+// Phase 1.5 r3 — debug text relay.  Lets upstream (Nival's CTextDraw /
+// CImageDraw path, which is compiled with STLport) push a short ASCII label
+// + on-screen position into a small ring buffer.  end_frame() flushes the
+// buffer into bgfx::dbgTextPrintf so we get VISIBLE text overlays in lieu
+// of a real font atlas binding.
+//
+// POD-only / extern "C" so it can be called across the modern-toolchain ↔
+// STLport ABI boundary.  Coordinates are in 1024x768 virtual screen space
+// (the same space Nival's UI uses) — end_frame() rescales to the current
+// dbg-text grid (80 cols × 24 rows, roughly).
+// ---------------------------------------------------------------------------
+extern "C" {
+// Push one label.  abgr is 0xAABBGGRR; text is null-terminated ASCII.  If
+// the buffer is full the call is silently dropped.  Cleared automatically
+// at end_frame() so callers re-submit every frame.
+void ss_dbg_text_push(int virtX, int virtY, unsigned attr, const char* text);
+// Set the "frame banner" message shown on row 0.  text == NULL clears it.
+void ss_dbg_text_banner(const char* text);
+} // extern "C"
