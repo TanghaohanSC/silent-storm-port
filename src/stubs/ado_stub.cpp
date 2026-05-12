@@ -89,6 +89,13 @@ void NDatabase::AddTable(int nTableID, const char* pszTableName,
     }
     GetRecordTypes().RegisterTypeSafe(nTableID, newf);
     tables[nTableID]; // create empty CDBTableBase
+    // silent-storm-port r16: log registration order to correlate with storage load order
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r16_addtable.log", "a");
+    if (fp) {
+        fprintf(fp, "AddTable[%d]: nTableID=0x%08X name='%s'\n",
+                (int)tables.size() - 1, nTableID, pszTableName ? pszTableName : "(null)");
+        fclose(fp);
+    }
 }
 
 CDBTableBase* NDatabase::GetTable(int nTableID)
