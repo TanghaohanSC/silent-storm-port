@@ -103,6 +103,7 @@ target_link_libraries(jan03_Main PUBLIC
     jan03::Script
     jan03::MiscDll
     silent_storm_ado_stub     # NDatabase runtime symbols (replaces ADOImport)
+    silent_storm_dbts_stub    # r11: CDBTableDataStorage (typeID 0xA1843130)
     silent_storm_stubs        # LifeStudioHeadAPI shim
     silent_storm_fmod_stub
 )
@@ -151,6 +152,7 @@ if(MSVC)
     target_link_options(silent_storm PRIVATE
         /WHOLEARCHIVE:Main
         /WHOLEARCHIVE:DBFormat
+        /WHOLEARCHIVE:silent_storm_dbts_stub
         /MAP:$<TARGET_FILE_DIR:silent_storm>/silent_storm.map
     )
 endif()
@@ -162,6 +164,7 @@ target_link_libraries(silent_storm PRIVATE
     silent_storm_stubs
     silent_storm_fmod_stub
     silent_storm_ado_stub
+    silent_storm_dbts_stub    # r11: CDBTableDataStorage class registration
     jan03::zlib
     jan03::libpng
     jan03::Misc

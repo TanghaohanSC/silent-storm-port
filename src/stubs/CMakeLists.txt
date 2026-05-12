@@ -38,6 +38,25 @@ if(WIN32)
     )
 endif()
 
+# --- CDBTableDataStorage (typeID 0xA1843130) stub ---
+# r11 RE identified this missing class as the heap-allocated storage wrapper
+# that the shipping binary uses around CDBTableBase's records. Registering an
+# empty stub lets the 155 instances in game.db instantiate cleanly so the
+# missing-class log spam disappears. See p1_5_r11_class_identified.md for the
+# full reverse-engineering trail and the wire-format work still pending.
+add_library(silent_storm_dbts_stub STATIC db_table_storage_stub.cpp)
+target_link_libraries(silent_storm_dbts_stub PUBLIC legacy::stlport jan03::Misc jan03::FileIO)
+set_target_properties(silent_storm_dbts_stub PROPERTIES
+    CXX_STANDARD 14
+    CXX_EXTENSIONS OFF
+)
+target_compile_definitions(silent_storm_dbts_stub PRIVATE
+    _CRT_SECURE_NO_WARNINGS _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
+    _HAS_CXX17=0
+)
+target_compile_options(silent_storm_dbts_stub PRIVATE /W0 /permissive /Zc:noexceptTypes-
+    /FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h)
+
 # --- ADOImport runtime stub: NDatabase symbols without ADO COM ---
 # Upstream ADOImport links against msado15.dll (Microsoft Access ADO). Only
 # the Import()/Refresh() paths use it, and those are dev-time only. This stub
