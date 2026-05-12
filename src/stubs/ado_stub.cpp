@@ -131,12 +131,97 @@ static void PromoteRecordsFromStorage()
     NDatabase::CTablesHash& tables = NDatabase::GetTables();
     CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
     int nMatched = 0, nPromoted = 0, nTotalTables = (int)tables.size();
+    // r23: dump body byte stats to reverse-engineer record body format
+    FILE* dump = NULL; fopen_s(&dump, "silent_storm_r23_body_dump.log", "w");
+    int dumped = 0;
     for (NDatabase::CTablesHash::iterator it = tables.begin(); it != tables.end(); ++it) {
         int nTableID = it->first;
         CDBTableBase& table = it->second;
         CDBTableDataStorage* s = table.GetStorage();
         if (!s) continue;
         ++nMatched;
+        // r23.2 diag: dump inner row containers (m_buckets/wstrings/chainNext)
+        if (dump && dumped < 4) {
+            int br = (int)s->m_buckets.size();
+            int cr = (int)s->m_chainNext.size();
+            int wr = (int)s->m_wstrings.size();
+            fprintf(dump, "\n=== table[%d]: rows? buck=%d chain=%d wstr=%d ; cols m_records=%d c6=%d c7=%d c8=%d ===\n",
+                    nTableID, br, cr, wr, (int)s->m_records.size(),
+                    (int)s->m_column6.size(), (int)s->m_column7.size(), (int)s->m_column8.size());
+            // First 3 buckets - what's inside?
+            for (int k = 0; k < 3 && k < br; ++k) {
+                const std::vector<int>& b = s->m_buckets[k];
+                fprintf(dump, "  bucket[%d] size=%d:", k, (int)b.size());
+                int dl = (int)b.size(); if (dl > 8) dl = 8;
+                for (int j = 0; j < dl; ++j) fprintf(dump, " %d", b[j]);
+                fprintf(dump, "\n");
+            }
+            // First 3 chainNext
+            for (int k = 0; k < 3 && k < cr; ++k) {
+                const std::vector<int>& c = s->m_chainNext[k];
+                fprintf(dump, "  chain[%d] size=%d:", k, (int)c.size());
+                int dl = (int)c.size(); if (dl > 8) dl = 8;
+                for (int j = 0; j < dl; ++j) fprintf(dump, " %d", c[j]);
+                fprintf(dump, "\n");
+            }
+            // First 3 wstrings rows
+            for (int k = 0; k < 3 && k < wr; ++k) {
+                const std::vector<std::wstring>& w = s->m_wstrings[k];
+                fprintf(dump, "  wstr_row[%d] size=%d:", k, (int)w.size());
+                int dl = (int)w.size(); if (dl > 3) dl = 3;
+                for (int j = 0; j < dl; ++j) {
+                    fprintf(dump, " '");
+                    int wl = (int)w[j].size(); if (wl > 16) wl = 16;
+                    for (int q = 0; q < wl; ++q)
+                        fprintf(dump, "%c", w[j][q] >= 32 && w[j][q] < 127 ? (char)w[j][q] : '.');
+                    fprintf(dump, "'");
+                }
+                fprintf(dump, "\n");
+            }
+            ++dumped;
+        }
+        // legacy diag block disabled
+        if (false && dump && dumped < 8 && !s->m_records.empty()) {
+            int n = (int)s->m_records.size();
+            int maxIdx = 0, maxSz = (int)s->m_records[0].body.size();
+            for (int j = 1; j < n; ++j) {
+                int sz = (int)s->m_records[j].body.size();
+                if (sz > maxSz) { maxSz = sz; maxIdx = j; }
+            }
+            fprintf(dump, "\n=== table[nTableID=%d]: %d records, c6=%d cols ===\n",
+                    nTableID, n, (int)s->m_column6.size());
+            // Show 1st 3 column names from c6/c7/c8
+            for (int c = 0; c < 3 && c < (int)s->m_column6.size(); ++c)
+                fprintf(dump, "  c6[%d]='%s'", c, s->m_column6[c].c_str());
+            fprintf(dump, "\n");
+            for (int c = 0; c < 3 && c < (int)s->m_column7.size(); ++c)
+                fprintf(dump, "  c7[%d]='%s'", c, s->m_column7[c].c_str());
+            fprintf(dump, "\n");
+            for (int c = 0; c < 3 && c < (int)s->m_column8.size(); ++c)
+                fprintf(dump, "  c8[%d]='%s'", c, s->m_column8[c].c_str());
+            fprintf(dump, "\n");
+            // Dump first 3 records + the largest one
+            int indices[4] = {0, 1, 2, maxIdx};
+            for (int k = 0; k < 4; ++k) {
+                int idx = indices[k];
+                if (idx >= n) continue;
+                if (k > 0 && idx == indices[k-1]) continue;
+                const std::string& body = s->m_records[idx].body;
+                fprintf(dump, "  rec[%d] id=%d sz=%d hex=",
+                        idx, s->m_records[idx].id, (int)body.size());
+                int dl = (int)body.size(); if (dl > 64) dl = 64;
+                for (int j = 0; j < dl; ++j)
+                    fprintf(dump, "%02X", (unsigned char)body[j]);
+                // Also try ASCII
+                fprintf(dump, " ascii=");
+                for (int j = 0; j < dl; ++j) {
+                    char c = body[j];
+                    fprintf(dump, "%c", (c >= 32 && c < 127) ? c : '.');
+                }
+                fprintf(dump, "\n");
+            }
+            ++dumped;
+        }
         for (size_t i = 0; i < s->m_records.size(); ++i) {
             CDBRecord* p = factory.CreateObject(nTableID);
             if (p) {
@@ -145,6 +230,7 @@ static void PromoteRecordsFromStorage()
             }
         }
     }
+    if (dump) fclose(dump);
     FILE* fp = NULL; fopen_s(&fp, "silent_storm_r21_promote.log", "w");
     if (fp) {
         fprintf(fp, "r21: promoted %d records from %d/%d tables with storage\n",
