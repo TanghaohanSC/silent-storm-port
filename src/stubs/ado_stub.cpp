@@ -41,18 +41,11 @@ using namespace std;
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\FileIO\BasicChunk1.h"
 #include "db_table_storage.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
-// silent-storm-port r20: Ghidra-RE of FUN_0044BBF0 (returns the field 2 global)
-// shows a 40-byte heap-allocated struct with self-referencing next/prev at
-// offsets 0 and 4 — a doubly-linked-list head sentinel. So shipping NDatabase
-// holds storages in `std::list<CObj<CDBTableDataStorage>>` (ordered, no keys),
-// not a hash_map. Wire dispatches through BasicChunk1.h's std::list template
-// which writes/reads N CObj refs as sub-chunks 1..N.
-typedef std::list<CObj<CDBTableDataStorage> > CStorageList;
-static CStorageList& GetStorageList()
-{
-    static CStorageList s_storage;
-    return s_storage;
-}
+// silent-storm-port r21: r20's std::list path was a dead end; r21 finds via
+// Ghidra-RE of shipping CDBTableBase::op& (FUN_00449A10) that storage is on
+// CDBTableBase itself (CObj<CDBTableDataStorage> m_storage). PromoteRecords
+// walks NDatabase::tables, materializing each table's records cache from its
+// m_storage.
 
 namespace NDatabase
 {
@@ -133,40 +126,46 @@ void NDatabase::Refresh(int /*nTableID*/)
 // instances and InsertRecord them into the matching CDBTableBase's
 // records hash_map. Records remain field-default (body decode is a
 // separate future round) — sufficient to clear BasicDB.h:102 asserts.
-static void PromoteRecordsFromStorageList()
+static void PromoteRecordsFromStorage()
 {
-    CStorageList& storageList = GetStorageList();
-    int nTotal = (int)storageList.size();
-    int nPromoted = 0;
-    // r20: no key info in std::list — for now just count + log the sizes.
-    // Mapping list-index → nTableID comes in the next round.
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r20_promote.log", "w");
-    if (fp) {
-        fprintf(fp, "r20: read %d storage entries from wire field 2 (std::list form)\n", nTotal);
-        int i = 0;
-        for (CStorageList::iterator it = storageList.begin(); it != storageList.end() && i < 20; ++it, ++i) {
-            CDBTableDataStorage* s = it->GetPtr();
-            if (s) fprintf(fp, "  storage[%d]: %d records, c6=%d cols\n",
-                           i, (int)s->m_records.size(), (int)s->m_column6.size());
-            else fprintf(fp, "  storage[%d]: NULL\n", i);
+    NDatabase::CTablesHash& tables = NDatabase::GetTables();
+    CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
+    int nMatched = 0, nPromoted = 0, nTotalTables = (int)tables.size();
+    for (NDatabase::CTablesHash::iterator it = tables.begin(); it != tables.end(); ++it) {
+        int nTableID = it->first;
+        CDBTableBase& table = it->second;
+        CDBTableDataStorage* s = table.GetStorage();
+        if (!s) continue;
+        ++nMatched;
+        for (size_t i = 0; i < s->m_records.size(); ++i) {
+            CDBRecord* p = factory.CreateObject(nTableID);
+            if (p) {
+                table.InsertRecord(s->m_records[i].id, p);
+                ++nPromoted;
+            }
         }
+    }
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r21_promote.log", "w");
+    if (fp) {
+        fprintf(fp, "r21: promoted %d records from %d/%d tables with storage\n",
+                nPromoted, nMatched, nTotalTables);
         fclose(fp);
     }
-    storageList.clear();
-    (void)nPromoted;
 }
 
 void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
 {
     CTablesHash& tables = GetTables();
-    CStorageList& storageList = GetStorageList();
     NDatabase::bIsDatabaseLoading = true;
     {
         CStructureSaver f(file, mode);
-        f.Add(1, &tables);          // field 1: tables hash_map (Jan03 compatible)
-        f.Add(2, &storageList);     // field 2: std::list of storage refs (r20)
+        f.Add(1, &tables);   // each table's op& reads CObj<storage> via Ghidra-confirmed wire
+        // r19/r20 attempts to also read field 2 — turned out shipping's field 1
+        // already carries all per-table storage refs via CDBTableBase::m_storage.
+        // The field 2 in NDatabase::Serialize (~25 extras) is for non-per-table
+        // storages we don't need yet.
     }
-    PromoteRecordsFromStorageList();
+    PromoteRecordsFromStorage();
     NDatabase::bIsDatabaseLoading = false;
 }
 
