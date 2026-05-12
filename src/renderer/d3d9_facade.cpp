@@ -15,6 +15,8 @@
 #include <cmath>    // std::floor, std::min, std::max, std::tan
 #include <algorithm>
 
+extern "C" void ss_dbg_rect_push(int x1, int y1, int x2, int y2, unsigned abgr);
+
 namespace silent_storm::renderer {
 
 // ---------------------------------------------------------------------------
@@ -365,6 +367,15 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
         }
     }
 
+    // r71: push a fake-terrain rect to the existing dbg-rect queue. end_frame
+    // already flushes that queue via ss_ui — proven path that lands pixels.
+    // Sky band (upper third) light blue
+    ss_dbg_rect_push(0, 90, 1024, 280, 0xff80a0ffu);
+    // Distant terrain (middle band) medium green
+    ss_dbg_rect_push(0, 280, 1024, 420, 0xff408050u);
+    // Near terrain (lower half) darker olive green
+    ss_dbg_rect_push(0, 420, 1024, 768, 0xff205030u);
+
     // Phase 1.5 r2 iter 5: submit a debug "I am alive" colored triangle once
     // per frame so we can validate the actual shader/vertex pipeline end-to-end.
     // Phase 1.5 r70: extend to a fake-terrain ground plane filling the lower
@@ -389,17 +400,17 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
         // Six verts (two tris) covering lower 2/3 of NDC framebuffer in
         // screen-space. NDC y is up-positive in bgfx. Color: olive-green
         // gradient (front lighter, back darker) suggesting a ground plane.
-        // r70b: olive-green ground plane covering lower NDC region.
-        // UVs all 0,0 -> sample white 1x1 fallback -> color = vertex color.
+        // r71: full-screen magenta to validate view 250 actually rasterizes.
+        // UVs 0,0 -> sample white 1x1 fallback -> color = vertex color.
         DbgVert verts[6] = {
             // First tri (BL, BR, TR)
-            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-left dark green
-            {  1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-right dark green
-            {  1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-right lighter
+            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
+            {  1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
+            {  1.0f,  1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
             // Second tri (BL, TR, TL)
-            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-left
-            {  1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-right
-            { -1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-left
+            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
+            {  1.0f,  1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
+            { -1.0f,  1.0f, 0.0f, 0.0f,0.0f, 0xffff00ffu },
         };
         if (bgfx::getAvailTransientVertexBuffer(6, s_layout) >= 6) {
             bgfx::TransientVertexBuffer tvb;
@@ -407,15 +418,22 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
             std::memcpy(tvb.data, verts, sizeof(verts));
 
             // Identity transforms — vertices are already in clip-space.
-            // r70b: submit on a separate view (250) drawn after view 0 so we
-            // overlay everything.
+            // r71: submit on view 250 with explicit FB=backbuffer, no clear.
             const bgfx::ViewId fg_view = 250;
+            static bool s_fg_view_inited = false;
+            if (!s_fg_view_inited) {
+                bgfx::setViewFrameBuffer(fg_view, BGFX_INVALID_HANDLE);
+                bgfx::setViewClear(fg_view, BGFX_CLEAR_NONE, 0, 1.0f, 0);
+                bgfx::setViewMode(fg_view, bgfx::ViewMode::Sequential);
+                s_fg_view_inited = true;
+            }
+            // setViewRect every frame (window may have resized).
+            bgfx::setViewRect(fg_view, 0, 0, bgfx::BackbufferRatio::Equal);
             float ident[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
             bgfx::setViewTransform(fg_view, ident, ident);
-            bgfx::setViewMode(fg_view, bgfx::ViewMode::Sequential);
-            bgfx::setViewRect(fg_view, 0, 0, bgfx::BackbufferRatio::Equal);
             bgfx::setTransform(ident);
-            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                BGFX_STATE_DEPTH_TEST_ALWAYS);
             bgfx::setVertexBuffer(0, &tvb);
             // r70: ss_ui fs samples s_diffuse and multiplies by vertex color —
             // without a valid texture bound, sample returns 0 -> black. Bind
