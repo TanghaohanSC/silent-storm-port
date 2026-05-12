@@ -57,43 +57,6 @@ public:
         f.Add(6, &m_column6);
         f.Add(7, &m_column7);
         f.Add(8, &m_column8);
-        // silent-storm-port r16: dump storage layout for nTableID hunt
-        if (f.IsReading()) {
-            FILE* fp = NULL;
-            fopen_s(&fp, "silent_storm_r16_storage_dump.log", "a");
-            if (fp) {
-                fprintf(fp, "storage @ %p: rec=%d buck=%d wstr=%d c6=%d c7=%d c8=%d",
-                    (void*)this, (int)m_records.size(), (int)m_buckets.size(),
-                    (int)m_wstrings.size(), (int)m_column6.size(),
-                    (int)m_column7.size(), (int)m_column8.size());
-                if (!m_records.empty()) {
-                    fprintf(fp, " ids=[");
-                    int n = (int)m_records.size(); if (n > 5) n = 5;
-                    for (int i = 0; i < n; ++i) fprintf(fp, "%d,", m_records[i].id);
-                    fprintf(fp, "] body0=%d", (int)m_records[0].body.size());
-                }
-                if (!m_column6.empty() && !m_column6[0].empty()) {
-                    fprintf(fp, " c6[0]_b=");
-                    int n = (int)m_column6[0].size(); if (n > 8) n = 8;
-                    for (int i = 0; i < n; ++i)
-                        fprintf(fp, "%02X", (unsigned char)m_column6[0][i]);
-                }
-                if (!m_column7.empty() && !m_column7[0].empty()) {
-                    fprintf(fp, " c7[0]_b=");
-                    int n = (int)m_column7[0].size(); if (n > 8) n = 8;
-                    for (int i = 0; i < n; ++i)
-                        fprintf(fp, "%02X", (unsigned char)m_column7[0][i]);
-                }
-                if (!m_column8.empty() && !m_column8[0].empty()) {
-                    fprintf(fp, " c8[0]_b=");
-                    int n = (int)m_column8[0].size(); if (n > 8) n = 8;
-                    for (int i = 0; i < n; ++i)
-                        fprintf(fp, "%02X", (unsigned char)m_column8[0][i]);
-                }
-                fprintf(fp, "\n");
-                fclose(fp);
-            }
-        }
         return 0;
     }
 };

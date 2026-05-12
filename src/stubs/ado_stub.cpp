@@ -42,17 +42,39 @@ using namespace std;
 #include "db_table_storage.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
 #include <map>
-// silent-storm-port r15: temporary backref while CDBTableBase::operator& runs.
-// Populated by PortReadCDBTableStorage; consumed + cleared by PromoteRecordsFromStorage.
-static std::map<CDBTableBase*, CObj<CDBTableDataStorage> > s_tableToStorage;
+#include <set>
+// silent-storm-port r17: schema-based storage<->table linkage.
+// At AddTable time we run Import() against a probe instance, capturing the
+// ImportField column names. At storage load time the storage::operator& tail
+// looks up its c6 column set in s_tableSchemas to find the matching nTableID.
+namespace {
+    static int s_currentProbeTableID = -1;  // thread-local-ish (single-threaded boot)
+    static std::map<int, std::set<std::string> > s_tableSchemas;       // nTableID -> {col names}
+    static std::map<std::set<std::string>, int> s_schemaToTable;       // {col names} -> nTableID
+}
 
+// Called by db_table_storage.h's operator& after fields load.
+// Returns nTableID for the storage, or -1 if no match.
+int PortFindStorageTable( const std::vector<std::string>& c6 )
+{
+    std::set<std::string> cols(c6.begin(), c6.end());
+    std::map<std::set<std::string>, int>::iterator it = s_schemaToTable.find(cols);
+    if (it != s_schemaToTable.end()) return it->second;
+    return -1;
+}
+
+// silent-storm-port r15: temporary backref (now unused — kept so BasicDB.h's
+// forward declaration still resolves at link time).
 void PortReadCDBTableStorage( CStructureSaver& f, CDBTableBase* pTable )
 {
-    CObj<CDBTableDataStorage> storage;
-    f.Add( 1, &storage );
-    if ( storage.GetPtr() ) {
-        s_tableToStorage[pTable] = storage;
-    }
+    // r15 approach: tried to read CObj<CDBTableDataStorage> from wire field 1.
+    // r16 revealed the wire holds no such ref — storage objects are obj-pool
+    // orphans. r17 routes through schema matching instead; this helper is now
+    // a no-op that just consumes whatever's in the field 1 chunk (which is
+    // empty/null on the wire for this path).
+    CObj<CDBTableDataStorage> _unused;
+    f.Add( 1, &_unused );
+    (void)pTable;
 }
 
 namespace NDatabase
@@ -89,7 +111,12 @@ void NDatabase::AddTable(int nTableID, const char* pszTableName,
     }
     GetRecordTypes().RegisterTypeSafe(nTableID, newf);
     tables[nTableID]; // create empty CDBTableBase
-    // silent-storm-port r16: log registration order to correlate with storage load order
+    // r17 attempted: probe = newf(); probe->Import() to capture columns.
+    // Crashed: CRndModel::Import() calls GetGeometry() which needs the
+    // Geometry table already populated — pre-load Import() probing is
+    // unsafe because Imports reference other tables. Rolled back; will
+    // need a different approach (Ghidra-RE NDatabase::Serialize in
+    // MapEdit.exe to find the real storage↔table linkage).
     FILE* fp = NULL; fopen_s(&fp, "silent_storm_r16_addtable.log", "a");
     if (fp) {
         fprintf(fp, "AddTable[%d]: nTableID=0x%08X name='%s'\n",
@@ -124,28 +151,34 @@ void NDatabase::Refresh(int /*nTableID*/)
     ASSERT(0);
 }
 
-// silent-storm-port r15: scan storage objects loaded by PortReadCDBTableStorage,
-// create empty records (no body decode for now), populate CDBTableBase::records
-// hash_map so GetDBRecord(nID) finds a non-null entry. This eliminates the 335
-// BasicDB.h:102 cascade asserts seen in r14. Records have correct nID but
-// default-initialized data fields — sufficient for the assert path; downstream
-// record-content reads will see defaults until body bytes are decoded in r16.
+// r17: storage→nTableID associations captured during storage load.
+static std::map<CDBTableDataStorage*, int> s_loadedStorages;
+
+void PortRegisterLoadedStorage(int nTableID, CDBTableDataStorage* s)
+{
+    if (s) s_loadedStorages[s] = nTableID;
+}
+
+// silent-storm-port r17: promote records from schema-matched storages.
+// For each (storage, nTableID) pair, factory-create empty CDBRecord
+// instances (typeID = nTableID), set nID = stored record id, register
+// into CDBTableBase::records. Records remain field-default (no body
+// decode yet) — sufficient to clear BasicDB.h:102 GetRecord asserts.
 static void PromoteRecordsFromStorage()
 {
     NDatabase::CTablesHash& tables = NDatabase::GetTables();
     CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
     int nPromoted = 0;
-    int nStorages = (int)s_tableToStorage.size();
-    for (std::map<CDBTableBase*, CObj<CDBTableDataStorage> >::iterator
-         it = s_tableToStorage.begin(); it != s_tableToStorage.end(); ++it) {
-        CDBTableBase* pTable = it->first;
-        CDBTableDataStorage* pStorage = it->second.GetPtr();
-        if (!pStorage) continue;
-        int nTableID = -1;
-        for (NDatabase::CTablesHash::iterator tk = tables.begin(); tk != tables.end(); ++tk) {
-            if (&tk->second == pTable) { nTableID = tk->first; break; }
-        }
-        if (nTableID < 0) continue;
+    int nUnmatched = 0;
+    int nStorages = (int)s_loadedStorages.size();
+    for (std::map<CDBTableDataStorage*, int>::iterator
+         it = s_loadedStorages.begin(); it != s_loadedStorages.end(); ++it) {
+        CDBTableDataStorage* pStorage = it->first;
+        int nTableID = it->second;
+        if (nTableID < 0) { ++nUnmatched; continue; }
+        NDatabase::CTablesHash::iterator tk = tables.find(nTableID);
+        if (tk == tables.end()) { ++nUnmatched; continue; }
+        CDBTableBase* pTable = &tk->second;
         for (size_t i = 0; i < pStorage->m_records.size(); ++i) {
             CDBRecord* p = factory.CreateObject(nTableID);
             if (p) {
@@ -154,11 +187,11 @@ static void PromoteRecordsFromStorage()
             }
         }
     }
-    s_tableToStorage.clear();
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r15_promote.log", "w");
+    s_loadedStorages.clear();
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r17_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r15 promoted %d records from %d storage objects\n",
-                nPromoted, nStorages);
+        fprintf(fp, "r17 promoted %d records from %d matched storages (%d unmatched)\n",
+                nPromoted, nStorages - nUnmatched, nUnmatched);
         fclose(fp);
     }
 }
@@ -175,6 +208,7 @@ void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
     NDatabase::bIsDatabaseLoading = false;
 }
 
+// r17 attempt rolled back: ImportField probing requires fully-loaded tables.
 void NDatabase::ImportField(const char*, int*)            { ASSERT(0); }
 void NDatabase::ImportField(const char*, bool*)           { ASSERT(0); }
 void NDatabase::ImportField(const char*, float*)          { ASSERT(0); }
