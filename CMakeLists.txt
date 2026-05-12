@@ -85,9 +85,11 @@ target_link_libraries(jan03_OpenDynamix PUBLIC jan03::Misc)
 target_link_libraries(jan03_MiscDll PUBLIC jan03::Misc)
 
 # Main: the big game logic library. 271 .cpp files of pre-modern C++.
-# Built as OBJECT to avoid Main.def export plumbing — Game.exe links
-# everything statically.
-add_jan03_subproject(Main TYPE OBJECT)
+# Built as STATIC (was OBJECT pre-Phase 1.5) so we can use /WHOLEARCHIVE
+# on it. Many REGISTER_SAVELOAD_CLASS static initializers are otherwise
+# dead-stripped by the linker since no .cpp directly references them —
+# game.db then tries to deserialize unregistered class typeIDs and asserts.
+add_jan03_subproject(Main TYPE STATIC)
 target_link_libraries(jan03_Main PUBLIC
     jan03::Misc
     jan03::MemoryMngr
@@ -140,6 +142,13 @@ if(MSVC)
         /W0 /Zm300 /wd4828 /EHsc /MP /permissive
         /Zc:noexceptTypes- /Zc:ternary-
         /FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h
+    )
+    # Phase 1.5: prevent linker dead-strip of REGISTER_SAVELOAD_CLASS
+    # static initializers in Main. Without this, game.db deserialization
+    # asserts on missing class typeIDs.
+    target_link_options(silent_storm PRIVATE
+        /WHOLEARCHIVE:Main
+        /WHOLEARCHIVE:DBFormat
     )
 endif()
 target_link_libraries(silent_storm PRIVATE
