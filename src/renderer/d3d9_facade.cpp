@@ -367,48 +367,79 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
 
     // Phase 1.5 r2 iter 5: submit a debug "I am alive" colored triangle once
     // per frame so we can validate the actual shader/vertex pipeline end-to-end.
-    // Drawn in screen-space NDC via the ss_ui shader (no transforms needed).
-    // Removed when real geometry submits start arriving from Nival's draw path.
+    // Phase 1.5 r70: extend to a fake-terrain ground plane filling the lower
+    // half of the framebuffer in NDC. Two triangles, green-grey gradient. Acts
+    // as the visible terrain proxy while upstream pScene->Draw still SEHs in
+    // the partial-world Init path. ss_ui shader is fine — accepts position +
+    // ABGR color, no texture.
     {
         static bgfx::VertexLayout s_layout;
         static bool s_layout_init = false;
         if (!s_layout_init) {
             s_layout
                 .begin()
-                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+                .add(bgfx::Attrib::Position,  3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0,    4, bgfx::AttribType::Uint8, true)
                 .end();
             s_layout_init = true;
         }
 
-        struct DbgVert { float x, y, z; uint32_t abgr; };
-        // Three corners in NDC (-1..+1).  Colors: R/G/B.  Compact triangle in
-        // top-right so it doesn't fight the bgfx debug-text overlay (top-left).
-        DbgVert verts[3] = {
-            {  0.30f,  0.55f, 0.0f, 0xff0000ffu },   // red
-            {  0.85f,  0.55f, 0.0f, 0xff00ff00u },   // green
-            {  0.575f, 0.95f, 0.0f, 0xffff0000u },   // blue
+        struct DbgVert { float x, y, z; float u, v; uint32_t abgr; };
+        // Six verts (two tris) covering lower 2/3 of NDC framebuffer in
+        // screen-space. NDC y is up-positive in bgfx. Color: olive-green
+        // gradient (front lighter, back darker) suggesting a ground plane.
+        // r70b: olive-green ground plane covering lower NDC region.
+        // UVs all 0,0 -> sample white 1x1 fallback -> color = vertex color.
+        DbgVert verts[6] = {
+            // First tri (BL, BR, TR)
+            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-left dark green
+            {  1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-right dark green
+            {  1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-right lighter
+            // Second tri (BL, TR, TL)
+            { -1.0f, -1.0f, 0.0f, 0.0f,0.0f, 0xff206030u },   // bottom-left
+            {  1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-right
+            { -1.0f,  0.30f, 0.0f, 0.0f,0.0f, 0xff60a070u },  // top-left
         };
-        if (bgfx::getAvailTransientVertexBuffer(3, s_layout) >= 3) {
+        if (bgfx::getAvailTransientVertexBuffer(6, s_layout) >= 6) {
             bgfx::TransientVertexBuffer tvb;
-            bgfx::allocTransientVertexBuffer(&tvb, 3, s_layout);
+            bgfx::allocTransientVertexBuffer(&tvb, 6, s_layout);
             std::memcpy(tvb.data, verts, sizeof(verts));
 
             // Identity transforms — vertices are already in clip-space.
+            // r70b: submit on a separate view (250) drawn after view 0 so we
+            // overlay everything.
+            const bgfx::ViewId fg_view = 250;
             float ident[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-            bgfx::setViewTransform(current_view_id_, ident, ident);
+            bgfx::setViewTransform(fg_view, ident, ident);
+            bgfx::setViewMode(fg_view, bgfx::ViewMode::Sequential);
+            bgfx::setViewRect(fg_view, 0, 0, bgfx::BackbufferRatio::Equal);
             bgfx::setTransform(ident);
             bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
             bgfx::setVertexBuffer(0, &tvb);
+            // r70: ss_ui fs samples s_diffuse and multiplies by vertex color —
+            // without a valid texture bound, sample returns 0 -> black. Bind
+            // a literal 1x1 white texture and sampler uniform created here.
+            static bgfx::TextureHandle s_fg_tex = BGFX_INVALID_HANDLE;
+            static bgfx::UniformHandle s_fg_smp = BGFX_INVALID_HANDLE;
+            if (!bgfx::isValid(s_fg_tex)) {
+                const uint32_t white_px = 0xffffffffu;
+                const bgfx::Memory* mem = bgfx::copy(&white_px, sizeof(white_px));
+                s_fg_tex = bgfx::createTexture2D(1, 1, false, 1,
+                    bgfx::TextureFormat::BGRA8, BGFX_TEXTURE_NONE, mem);
+                s_fg_smp = bgfx::createUniform("s_diffuse", bgfx::UniformType::Sampler);
+            }
+            bgfx::setTexture(0, s_fg_smp, s_fg_tex);
 
             bgfx::ProgramHandle prog = get_program("ss_ui");
             if (bgfx::isValid(prog)) {
-                bgfx::submit(current_view_id_, prog);
+                bgfx::submit(fg_view, prog);
                 static int once_tri = 0;
                 if (once_tri < 3) {
                     ++once_tri;
                     if (FILE* f = draw_log()) {
-                        fprintf(f, "[dbg_tri#%d] submitted via ss_ui\n", once_tri);
+                        fprintf(f, "[fake_ground#%d] submitted via ss_ui view=%u\n",
+                                once_tri, (unsigned)fg_view);
                         fflush(f);
                     }
                 }
