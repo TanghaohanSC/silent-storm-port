@@ -64,3 +64,26 @@ Patched every linked-subproject `StdAfx.h` (`Main`, `Game`, `Misc`,
 `MessageBox` + `__debugbreak()`. This is gated on
 `SS_ASSERT_LOG_AND_CONTINUE` which we hard-define inside the `_DEBUG` arm.
 Phase 1.5 only — restore the popup before shipping.
+
+### `upstream/.../Main/iInterMission.cpp`
+
+Skip the text-rendering call `pInterface->Draw(GetTime())` in
+`CInterMissionInterface::RenderFrame()` when `SS_PHASE1_5_SKIP_TEXT_DRAW`
+is defined. The text formatter / font cache currently access null pointers
+because no font texture is bound through the bgfx facade (Phase 2 work).
+With this gate active, the main loop survives and we see the gray
+`ClearScreen(0.5,0.5,0.5)` color in the bgfx-backed client area.
+
+## Status at Phase 1.5 end
+
+- `silent_storm.exe` stays alive in the main loop, ticking
+  `CInterMissionInterface::Step()` every frame.
+- SDL3 window opens with title "A5".
+- bgfx D3D11 backend clears to grey (0.5).
+- Steps remaining for Phase 2:
+  - Wire bgfx back-buffer size to match the SDL window client rect (currently
+    100x100, set during `bgfx::init` before `SetMode` ran).
+  - Bind a font texture so CMLText / CTextDraw rendering produces glyphs
+    (currently bypassed by `SS_PHASE1_5_SKIP_TEXT_DRAW`).
+  - Implement `D3D9Facade::SetVertexShader/SetPixelShader/etc.` translation
+    to bgfx::ProgramHandle so geometry submits with actual pipeline state.
