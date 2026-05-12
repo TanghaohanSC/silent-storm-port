@@ -5,6 +5,7 @@
     "dependencies": [
         "sdl3",
         "fmt",
+        "flatbuffers",
         {
             "name": "ffmpeg",
             "default-features": false,
