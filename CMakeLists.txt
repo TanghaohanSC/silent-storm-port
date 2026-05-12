@@ -113,6 +113,13 @@ target_include_directories(jan03_Main PRIVATE
 )
 target_compile_definitions(jan03_Main PRIVATE SS_USE_BGFX_FACADE)
 
+# r29: dbfill — schema-based static record field fill. Depends on jan03_DBFormat
+# (NDb record class defs) + silent_storm_dbts_stub (CDBTableDataStorage def) +
+# silent_storm_ado_stub (NDatabase::GetTable). Added here, after those targets
+# exist. Exposes one C-style entry point that ado_stub's PromoteRecordsFromStorage
+# calls at the tail of NDatabase::Serialize().
+add_subdirectory(src/dbfill)
+
 # --- Game.exe: WinMain + main loop. Links statically against everything. ---
 set(JAN03_GAME_DIR "${CMAKE_SOURCE_DIR}/../upstream/Soft/Andy/Jan03/a5dll/Game")
 add_executable(silent_storm WIN32
@@ -165,6 +172,7 @@ target_link_libraries(silent_storm PRIVATE
     silent_storm_fmod_stub
     silent_storm_ado_stub
     silent_storm_dbts_stub    # r11: CDBTableDataStorage class registration
+    silent_storm_dbfill       # r29: schema-based record body field fill
     jan03::zlib
     jan03::libpng
     jan03::Misc

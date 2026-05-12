@@ -298,6 +298,21 @@ REGISTER_SAVELOAD_RE = re.compile(
     re.VERBOSE,
 )
 
+# REGISTER_DATABASE_CLASS( N, "TableName", ClassName )
+# REGISTER_DATABASE_CLASS_NM( N, "TableName", ClassName, NDb )
+# REGISTER_DATABASE_CLASS_TEMPL( N, "TableName", ClassName, OtherClass )
+# N may be decimal (e.g. 1, 26) or hex (e.g. 0xE0000001).
+REGISTER_DATABASE_RE = re.compile(
+    r"""\bREGISTER_DATABASE_CLASS(?P<suffix>_NM|_TEMPL)?\s*\(\s*
+        (?P<tableid>0[xX][0-9A-Fa-f]+|\d+)\s*,\s*
+        "(?P<tablename>[^"\\]*)"\s*,\s*
+        (?P<cls>[A-Za-z_]\w*)
+        (?:\s*,\s*(?P<extra>[A-Za-z_]\w*))?
+        \s*\)
+    """,
+    re.VERBOSE,
+)
+
 # Within a single statement: NDatabase::ImportField( "Name", &expr );
 # The expression must be a single &<identifier>(.<identifier>)? — anything
 # else (cast, subscript, complex expr) disqualifies the class.
@@ -420,13 +435,35 @@ def parse_saveload_registrations(src: str) -> dict:
     return out
 
 
+def parse_database_registrations(src: str) -> dict:
+    """Return {ClassName: (nTableID_int, tableName)} for every
+    REGISTER_DATABASE_CLASS(_NM|_TEMPL) match in the given (comment-stripped)
+    source. nTableID may be small decimal (e.g. 1, 26) or hex (e.g. 0xE0000001).
+    """
+    out = {}
+    for m in REGISTER_DATABASE_RE.finditer(src):
+        cls = m.group("cls")
+        raw = m.group("tableid")
+        try:
+            tid = int(raw, 16) if raw.lower().startswith("0x") else int(raw, 10)
+        except ValueError:
+            continue
+        out.setdefault(cls, (tid, m.group("tablename")))
+    return out
+
+
 def parse_cpp(path: Path):
-    """Return (parsed: list[ParsedImport], skipped: list[SkippedImport], regs: dict)."""
+    """Return (parsed, skipped, regs, db_regs).
+
+    regs: {ClassName: saveload_typeID_int}
+    db_regs: {ClassName: (nTableID_int, tableName_str)}
+    """
     raw = path.read_text(encoding="utf-8", errors="replace")
     src = strip_comments(raw)
     parsed = []
     skipped = []
     regs = parse_saveload_registrations(src)
+    db_regs = parse_database_registrations(src)
     for m in IMPORT_FN_RE.finditer(src):
         cls = m.group(1)
         open_brace = m.end() - 1
@@ -463,7 +500,7 @@ def parse_cpp(path: Path):
             skipped.append(SkippedImport(cls, path.name, line_no, "empty Import body"))
             continue
         parsed.append(ParsedImport(cls, calls, path.name, line_no))
-    return parsed, skipped, regs
+    return parsed, skipped, regs, db_regs
 
 
 # ---------------------------------------------------------------------------
@@ -520,10 +557,10 @@ def resolve_type_code(
 def resolve_outer_struct_type(
     class_name: str, outer_member: str, headers: list
 ) -> str | None:
-    """Return a string like 'CVec3' to be used inside offsetof(<struct>, sub).
-    Returns None if we can't tell, in which case we fall back to using the
-    outer member's containing class (which will fail to compile but flags it
-    clearly)."""
+    """Return a string like 'CVec3' or 'CTPoint<int>' to be used inside
+    offsetof(<struct>, sub). Preserves template arguments so offsetof works
+    on instantiated class templates (e.g. CTPoint<int>). Returns None if we
+    can't tell, in which case the caller falls back to a zero subOffset."""
     for hi in headers:
         if class_name in hi.classes:
             members = hi.classes[class_name]
@@ -533,10 +570,16 @@ def resolve_outer_struct_type(
                 if t.startswith("const "):
                     t = t[6:].strip()
                 t = t.rstrip("*&").strip()
-                # Take just the leading identifier (before any '<').
-                base = t.split("<", 1)[0].strip()
-                # Strip namespace prefix.
-                base = base.rsplit("::", 1)[-1]
+                # Strip namespace prefix from the leading identifier, but
+                # KEEP any '<...>' template args appended.
+                lt = t.find("<")
+                if lt < 0:
+                    base = t.rsplit("::", 1)[-1]
+                else:
+                    head = t[:lt].rsplit("::", 1)[-1]
+                    base = head + t[lt:]
+                # Normalize internal whitespace.
+                base = re.sub(r"\s+", " ", base).strip()
                 if base:
                     return base
     return None
@@ -565,13 +608,19 @@ def main() -> int:
 
     all_parsed = []
     all_skipped = []
-    all_regs = {}  # ClassName -> typeID (int)
+    all_regs = {}  # ClassName -> saveload typeID (int)
+    all_db_regs = {}  # ClassName -> (nTableID, tableName)
+    # Scan all Data*.cpp for both Import bodies AND REGISTER_DATABASE_CLASS.
+    # In practice REGISTER_DATABASE_CLASS lives in DataFormat.cpp; scanning all
+    # is cheap and future-proof.
     for cpp in cpp_files:
-        parsed, skipped, regs = parse_cpp(cpp)
+        parsed, skipped, regs, db_regs = parse_cpp(cpp)
         all_parsed.extend(parsed)
         all_skipped.extend(skipped)
         for cls, tid in regs.items():
             all_regs.setdefault(cls, tid)
+        for cls, info in db_regs.items():
+            all_db_regs.setdefault(cls, info)
 
     # Emit the header.
     lines = []
@@ -638,37 +687,56 @@ def main() -> int:
         lines.append("}")
         lines.append("")
 
-    # --- Registry: SSchemaEntry table mapping typeID -> schema getter ---
-    registry_entries = []  # list of (cls, tid)
-    missing_typeid = []
-    for p in all_parsed:
-        tid = all_regs.get(p.class_name)
-        if tid is None:
-            missing_typeid.append(p.class_name)
+    # --- Registry: SSchemaEntry table mapping nTableID -> schema getter ---
+    # Key insight: NDatabase::tables is keyed by the small int / hex constant
+    # passed as the FIRST arg to REGISTER_DATABASE_CLASS (e.g. 1 = Models,
+    # 26 = SolidModels, 0xE0000001 = RPGWeaponTypes). That is a DIFFERENT
+    # keyspace from the REGISTER_SAVELOAD_CLASS typeIDs we used pre-r29.
+    # PromoteRecordsFromStorage iterates by nTableID, so the registry MUST be
+    # keyed by nTableID for GetTable(typeID) lookups to succeed.
+    parsed_set = {p.class_name for p in all_parsed}
+    parsed_by_class = {p.class_name: p for p in all_parsed}
+    registry_entries = []  # list of (cls, nTableID, tableName)
+    db_without_schema = []  # have REGISTER_DATABASE_CLASS but no Import schema
+    schema_without_db = []  # have Import schema but no REGISTER_DATABASE_CLASS
+
+    for cls, (tid, tname) in all_db_regs.items():
+        if cls not in parsed_set:
+            db_without_schema.append((cls, tid, tname))
             continue
-        registry_entries.append((p.class_name, tid))
-    # Stable sort by typeID for determinism.
+        registry_entries.append((cls, tid, tname))
+    for p in all_parsed:
+        if p.class_name not in all_db_regs:
+            schema_without_db.append(p.class_name)
+
+    # Stable sort by nTableID for determinism.
     registry_entries.sort(key=lambda x: x[1])
 
     lines.append("// ---------------------------------------------------------------------------")
-    lines.append("// Schema registry: typeID -> schema getter")
+    lines.append("// Schema registry: nTableID -> schema getter")
+    lines.append("// nTableID is the first arg to REGISTER_DATABASE_CLASS(...) — the SAME key")
+    lines.append("// used by NDatabase::tables / NDatabase::GetTable(int).")
     lines.append("// ---------------------------------------------------------------------------")
     lines.append("")
     lines.append("struct SSchemaEntry {")
-    lines.append("    int typeID;")
+    lines.append("    int typeID;       // nTableID — matches NDatabase::GetTable() key")
     lines.append("    const SColumnInfo* (*getter)();")
     lines.append("};")
     lines.append("")
-    # Inline wrapper functions: one per class with a known typeID.
-    for cls, _tid in registry_entries:
+    # Inline wrapper functions: one per class with a known nTableID + schema.
+    emitted_wrappers = set()
+    for cls, _tid, _tname in registry_entries:
+        if cls in emitted_wrappers:
+            continue
+        emitted_wrappers.add(cls)
         lines.append(
             f"inline const SColumnInfo* getSchema{cls}() {{ return GetSchemaFor<NDb::{cls}>(); }}"
         )
     lines.append("")
     lines.append("inline const SSchemaEntry* GetAllSchemas(int* outCount) {")
     lines.append("    static const SSchemaEntry entries[] = {")
-    for cls, tid in registry_entries:
-        lines.append(f"        {{ 0x{tid:08x}, &getSchema{cls} }},")
+    for cls, tid, tname in registry_entries:
+        lines.append(f"        {{ 0x{tid & 0xFFFFFFFF:08x}, &getSchema{cls} }},  // {tname}")
     lines.append("    };")
     lines.append("    *outCount = sizeof(entries) / sizeof(entries[0]);")
     lines.append("    return entries;")
@@ -689,10 +757,21 @@ def main() -> int:
     for s in all_skipped:
         print(f"  - {s.class_name}  ({s.cpp_file}:{s.line_no})  {s.reason}")
     print(f"REGISTER_SAVELOAD_CLASS entries found: {len(all_regs)}")
-    print(f"Registry entries emitted: {len(registry_entries)}")
-    if missing_typeid:
-        print(f"Parsed classes lacking a REGISTER_SAVELOAD_CLASS (skipped from registry): {len(missing_typeid)}")
-        for cls in missing_typeid:
+    print(f"REGISTER_DATABASE_CLASS entries found: {len(all_db_regs)}")
+    print(f"Registry entries emitted (matched schema + REGISTER_DATABASE_CLASS): {len(registry_entries)}")
+    if db_without_schema:
+        print(
+            f"REGISTER_DATABASE_CLASS classes WITHOUT a parsed schema (log + skip): "
+            f"{len(db_without_schema)}"
+        )
+        for cls, tid, tname in db_without_schema:
+            print(f"  - {cls}  table={tname}  nTableID=0x{tid & 0xFFFFFFFF:08x}")
+    if schema_without_db:
+        print(
+            f"Parsed schema classes WITHOUT a REGISTER_DATABASE_CLASS "
+            f"(sub-record, not a top-level table — log + skip): {len(schema_without_db)}"
+        )
+        for cls in schema_without_db:
             print(f"  - {cls}")
     return 0
 

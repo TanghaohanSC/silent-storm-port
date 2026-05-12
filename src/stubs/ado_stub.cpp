@@ -48,6 +48,13 @@ using namespace std;
 // own compile unit with a proper header chain.
 // #include "db_record_schemas.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
+
+// r29: schema-based body fill, implemented in src/dbfill/dbfill.cpp. That TU
+// has Main/StdAfx.h as PCH and so can include db_record_schemas.h cleanly
+// (which transitively pulls 14 DataXxx.h record-class headers). We call it
+// at the tail of PromoteRecordsFromStorage() after the IDs-only basic
+// promote has materialized empty CDBRecord instances in each table.
+extern "C" int PortFillAllRecordsFromStorage();
 // silent-storm-port r21: r20's std::list path was a dead end; r21 finds via
 // Ghidra-RE of shipping CDBTableBase::op& (FUN_00449A10) that storage is on
 // CDBTableBase itself (CObj<CDBTableDataStorage> m_storage). PromoteRecords
@@ -328,10 +335,15 @@ static void PromoteRecordsFromStorage()
     }
     if (dump) fclose(dump);
     (void)nFieldsFilled;
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r28_promote.log", "w");
+    // r29: now that empty CDBRecord instances are materialized under their IDs
+    // in each table's records hash, hand off to dbfill.cpp which has access
+    // to NDb::* class definitions and can write fields by offsetof().
+    int nFilled = PortFillAllRecordsFromStorage();
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r29_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r28-staging: promoted %d records (IDs only — schema fill compile deferred to r29) %d/%d tables\n",
-                nPromoted, nMatched, nTotalTables);
+        fprintf(fp, "r29: promoted %d records (IDs) across %d/%d tables; "
+                    "schema-fill wrote %d fields\n",
+                nPromoted, nMatched, nTotalTables, nFilled);
         fclose(fp);
     }
 }

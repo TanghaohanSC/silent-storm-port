@@ -266,10 +266,10 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CWall>() {
         { "VariantID",   5, offsetof(NDb::CWall, pVariant), 0 },  // ref
         { "WallModelID", 5, offsetof(NDb::CWall, pModel), 0 },  // ref
         { "Floor",       0, offsetof(NDb::CWall, nFloor), 0 },  // int
-        { "StartX",      2, offsetof(NDb::CWall, ptStart), offsetof(CTPoint, x) },  // float
-        { "StartY",      2, offsetof(NDb::CWall, ptStart), offsetof(CTPoint, y) },  // float
-        { "EndX",        2, offsetof(NDb::CWall, ptEnd), offsetof(CTPoint, x) },  // float
-        { "EndY",        2, offsetof(NDb::CWall, ptEnd), offsetof(CTPoint, y) },  // float
+        { "StartX",      2, offsetof(NDb::CWall, ptStart), offsetof(CTPoint<int>, x) },  // float
+        { "StartY",      2, offsetof(NDb::CWall, ptStart), offsetof(CTPoint<int>, y) },  // float
+        { "EndX",        2, offsetof(NDb::CWall, ptEnd), offsetof(CTPoint<int>, x) },  // float
+        { "EndY",        2, offsetof(NDb::CWall, ptEnd), offsetof(CTPoint<int>, y) },  // float
         { nullptr, 0, 0, 0 }  // sentinel
     };
     return cols;
@@ -510,95 +510,97 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBAutoLoadScript>() {
 }
 
 // ---------------------------------------------------------------------------
-// Schema registry: typeID -> schema getter
+// Schema registry: nTableID -> schema getter
+// nTableID is the first arg to REGISTER_DATABASE_CLASS(...) — the SAME key
+// used by NDatabase::tables / NDatabase::GetTable(int).
 // ---------------------------------------------------------------------------
 
 struct SSchemaEntry {
-    int typeID;
+    int typeID;       // nTableID — matches NDatabase::GetTable() key
     const SColumnInfo* (*getter)();
 };
 
+inline const SColumnInfo* getSchemaCTemplate() { return GetSchemaFor<NDb::CTemplate>(); }
 inline const SColumnInfo* getSchemaCBRDF() { return GetSchemaFor<NDb::CBRDF>(); }
 inline const SColumnInfo* getSchemaCGeometry() { return GetSchemaFor<NDb::CGeometry>(); }
 inline const SColumnInfo* getSchemaCTypeface() { return GetSchemaFor<NDb::CTypeface>(); }
-inline const SColumnInfo* getSchemaCUIContainer() { return GetSchemaFor<NDb::CUIContainer>(); }
-inline const SColumnInfo* getSchemaCRoom() { return GetSchemaFor<NDb::CRoom>(); }
 inline const SColumnInfo* getSchemaCSkeleton() { return GetSchemaFor<NDb::CSkeleton>(); }
-inline const SColumnInfo* getSchemaCAttribute() { return GetSchemaFor<NDb::CAttribute>(); }
-inline const SColumnInfo* getSchemaCCubeTexture() { return GetSchemaFor<NDb::CCubeTexture>(); }
-inline const SColumnInfo* getSchemaCSolidModel() { return GetSchemaFor<NDb::CSolidModel>(); }
-inline const SColumnInfo* getSchemaCSolid() { return GetSchemaFor<NDb::CSolid>(); }
+inline const SColumnInfo* getSchemaCGlobalMap() { return GetSchemaFor<NDb::CGlobalMap>(); }
 inline const SColumnInfo* getSchemaCWallModel() { return GetSchemaFor<NDb::CWallModel>(); }
 inline const SColumnInfo* getSchemaCFloorModel() { return GetSchemaFor<NDb::CFloorModel>(); }
 inline const SColumnInfo* getSchemaCWall() { return GetSchemaFor<NDb::CWall>(); }
 inline const SColumnInfo* getSchemaCFloor() { return GetSchemaFor<NDb::CFloor>(); }
-inline const SColumnInfo* getSchemaCTemplate() { return GetSchemaFor<NDb::CTemplate>(); }
+inline const SColumnInfo* getSchemaCSolidModel() { return GetSchemaFor<NDb::CSolidModel>(); }
+inline const SColumnInfo* getSchemaCSolid() { return GetSchemaFor<NDb::CSolid>(); }
 inline const SColumnInfo* getSchemaCContainer() { return GetSchemaFor<NDb::CContainer>(); }
+inline const SColumnInfo* getSchemaCRoom() { return GetSchemaFor<NDb::CRoom>(); }
+inline const SColumnInfo* getSchemaCAttribute() { return GetSchemaFor<NDb::CAttribute>(); }
 inline const SColumnInfo* getSchemaCSound() { return GetSchemaFor<NDb::CSound>(); }
-inline const SColumnInfo* getSchemaCHead() { return GetSchemaFor<NDb::CHead>(); }
 inline const SColumnInfo* getSchemaCDebris() { return GetSchemaFor<NDb::CDebris>(); }
-inline const SColumnInfo* getSchemaCDBScenarioObjective2Clue() { return GetSchemaFor<NDb::CDBScenarioObjective2Clue>(); }
-inline const SColumnInfo* getSchemaCDBMinesConstants() { return GetSchemaFor<NDb::CDBMinesConstants>(); }
-inline const SColumnInfo* getSchemaCDBScenarioState() { return GetSchemaFor<NDb::CDBScenarioState>(); }
-inline const SColumnInfo* getSchemaCDBCamera() { return GetSchemaFor<NDb::CDBCamera>(); }
-inline const SColumnInfo* getSchemaCDBDialogSeq() { return GetSchemaFor<NDb::CDBDialogSeq>(); }
-inline const SColumnInfo* getSchemaCRPGInterruptsConstants() { return GetSchemaFor<NDb::CRPGInterruptsConstants>(); }
-inline const SColumnInfo* getSchemaCDBScenario() { return GetSchemaFor<NDb::CDBScenario>(); }
-inline const SColumnInfo* getSchemaCDBAutoLoadScript() { return GetSchemaFor<NDb::CDBAutoLoadScript>(); }
-inline const SColumnInfo* getSchemaCDBDialogPers() { return GetSchemaFor<NDb::CDBDialogPers>(); }
-inline const SColumnInfo* getSchemaCRPGAISoundConstants() { return GetSchemaFor<NDb::CRPGAISoundConstants>(); }
-inline const SColumnInfo* getSchemaCDBDialog() { return GetSchemaFor<NDb::CDBDialog>(); }
-inline const SColumnInfo* getSchemaCWaypointName() { return GetSchemaFor<NDb::CWaypointName>(); }
-inline const SColumnInfo* getSchemaCRPGMaterial() { return GetSchemaFor<NDb::CRPGMaterial>(); }
+inline const SColumnInfo* getSchemaCUIContainer() { return GetSchemaFor<NDb::CUIContainer>(); }
+inline const SColumnInfo* getSchemaCCubeTexture() { return GetSchemaFor<NDb::CCubeTexture>(); }
 inline const SColumnInfo* getSchemaCRPGToHit() { return GetSchemaFor<NDb::CRPGToHit>(); }
+inline const SColumnInfo* getSchemaCWaypointName() { return GetSchemaFor<NDb::CWaypointName>(); }
+inline const SColumnInfo* getSchemaCRPGAISoundConstants() { return GetSchemaFor<NDb::CRPGAISoundConstants>(); }
+inline const SColumnInfo* getSchemaCHead() { return GetSchemaFor<NDb::CHead>(); }
+inline const SColumnInfo* getSchemaCRPGInterruptsConstants() { return GetSchemaFor<NDb::CRPGInterruptsConstants>(); }
 inline const SColumnInfo* getSchemaCSpot() { return GetSchemaFor<NDb::CSpot>(); }
-inline const SColumnInfo* getSchemaCRPGStoreItem() { return GetSchemaFor<NDb::CRPGStoreItem>(); }
-inline const SColumnInfo* getSchemaCGlobalMap() { return GetSchemaFor<NDb::CGlobalMap>(); }
-inline const SColumnInfo* getSchemaCRPGItem2Uniform() { return GetSchemaFor<NDb::CRPGItem2Uniform>(); }
+inline const SColumnInfo* getSchemaCDBScenarioState() { return GetSchemaFor<NDb::CDBScenarioState>(); }
+inline const SColumnInfo* getSchemaCDBScenario() { return GetSchemaFor<NDb::CDBScenario>(); }
+inline const SColumnInfo* getSchemaCDBScenarioObjective2Clue() { return GetSchemaFor<NDb::CDBScenarioObjective2Clue>(); }
+inline const SColumnInfo* getSchemaCDBCamera() { return GetSchemaFor<NDb::CDBCamera>(); }
+inline const SColumnInfo* getSchemaCRPGMaterial() { return GetSchemaFor<NDb::CRPGMaterial>(); }
+inline const SColumnInfo* getSchemaCDBAutoLoadScript() { return GetSchemaFor<NDb::CDBAutoLoadScript>(); }
+inline const SColumnInfo* getSchemaCDBDialog() { return GetSchemaFor<NDb::CDBDialog>(); }
+inline const SColumnInfo* getSchemaCDBDialogSeq() { return GetSchemaFor<NDb::CDBDialogSeq>(); }
+inline const SColumnInfo* getSchemaCDBDialogPers() { return GetSchemaFor<NDb::CDBDialogPers>(); }
+inline const SColumnInfo* getSchemaCDBMinesConstants() { return GetSchemaFor<NDb::CDBMinesConstants>(); }
 inline const SColumnInfo* getSchemaCRPGArmor() { return GetSchemaFor<NDb::CRPGArmor>(); }
 inline const SColumnInfo* getSchemaCScript() { return GetSchemaFor<NDb::CScript>(); }
+inline const SColumnInfo* getSchemaCRPGItem2Uniform() { return GetSchemaFor<NDb::CRPGItem2Uniform>(); }
+inline const SColumnInfo* getSchemaCRPGStoreItem() { return GetSchemaFor<NDb::CRPGStoreItem>(); }
 
 inline const SSchemaEntry* GetAllSchemas(int* outCount) {
     static const SSchemaEntry entries[] = {
-        { 0x00121000, &getSchemaCBRDF },
-        { 0x00121200, &getSchemaCGeometry },
-        { 0x00221160, &getSchemaCTypeface },
-        { 0x002a1171, &getSchemaCUIContainer },
-        { 0x00571131, &getSchemaCRoom },
-        { 0x00721150, &getSchemaCSkeleton },
-        { 0x01681150, &getSchemaCAttribute },
-        { 0x01712180, &getSchemaCCubeTexture },
-        { 0x02151170, &getSchemaCSolidModel },
-        { 0x02151180, &getSchemaCSolid },
-        { 0x02331161, &getSchemaCWallModel },
-        { 0x02331162, &getSchemaCFloorModel },
-        { 0x02331163, &getSchemaCWall },
-        { 0x02331164, &getSchemaCFloor },
-        { 0x02511170, &getSchemaCTemplate },
-        { 0x02561180, &getSchemaCContainer },
-        { 0x02881170, &getSchemaCSound },
-        { 0x10842170, &getSchemaCHead },
-        { 0x11291121, &getSchemaCDebris },
-        { 0x50392125, &getSchemaCDBScenarioObjective2Clue },
-        { 0x50513160, &getSchemaCDBMinesConstants },
-        { 0x50882181, &getSchemaCDBScenarioState },
-        { 0x50992190, &getSchemaCDBCamera },
-        { 0x51322120, &getSchemaCDBDialogSeq },
-        { 0x51542120, &getSchemaCRPGInterruptsConstants },
-        { 0x51582130, &getSchemaCDBScenario },
-        { 0x51602180, &getSchemaCDBAutoLoadScript },
-        { 0x51722140, &getSchemaCDBDialogPers },
-        { 0x52632170, &getSchemaCRPGAISoundConstants },
-        { 0x53102110, &getSchemaCDBDialog },
-        { 0xa0532130, &getSchemaCWaypointName },
-        { 0xa15a2160, &getSchemaCRPGMaterial },
-        { 0xa2222130, &getSchemaCRPGToHit },
-        { 0xa2972170, &getSchemaCSpot },
-        { 0xb1028142, &getSchemaCRPGStoreItem },
-        { 0xb1962150, &getSchemaCGlobalMap },
-        { 0xe01b1160, &getSchemaCRPGItem2Uniform },
-        { 0xe0502151, &getSchemaCRPGArmor },
-        { 0xe1991120, &getSchemaCScript },
+        { 0x00000004, &getSchemaCTemplate },  // Templates
+        { 0x00000008, &getSchemaCBRDF },  // BRDFs
+        { 0x0000000a, &getSchemaCGeometry },  // Geometries
+        { 0x0000000c, &getSchemaCTypeface },  // Fonts
+        { 0x0000000d, &getSchemaCSkeleton },  // Skeletons
+        { 0x00000010, &getSchemaCGlobalMap },  // GlobalMaps
+        { 0x00000015, &getSchemaCWallModel },  // WallModels
+        { 0x00000016, &getSchemaCFloorModel },  // FloorModels
+        { 0x00000017, &getSchemaCWall },  // Walls
+        { 0x00000018, &getSchemaCFloor },  // Floors
+        { 0x0000001a, &getSchemaCSolidModel },  // SolidModels
+        { 0x0000001b, &getSchemaCSolid },  // SolidObjects
+        { 0x0000001c, &getSchemaCContainer },  // Containers
+        { 0x0000001e, &getSchemaCRoom },  // Rooms
+        { 0x00000023, &getSchemaCAttribute },  // Attributes
+        { 0x00000025, &getSchemaCSound },  // Sounds
+        { 0x00000027, &getSchemaCDebris },  // Debris
+        { 0x0000002c, &getSchemaCUIContainer },  // UIContainers
+        { 0x00000035, &getSchemaCCubeTexture },  // CubeTextures
+        { 0x0000003b, &getSchemaCRPGToHit },  // RPGToHits
+        { 0x0000003f, &getSchemaCWaypointName },  // WaypointNames
+        { 0x00000044, &getSchemaCRPGAISoundConstants },  // AISoundConstants
+        { 0x00000045, &getSchemaCHead },  // Heads
+        { 0x00000047, &getSchemaCRPGInterruptsConstants },  // InterruptsConstants
+        { 0x0000004e, &getSchemaCSpot },  // Spots
+        { 0x00000050, &getSchemaCDBScenarioState },  // ScenarioStates
+        { 0x00000053, &getSchemaCDBScenario },  // Scenarios
+        { 0x00000054, &getSchemaCDBScenarioObjective2Clue },  // ScenarioObjective2Clues
+        { 0x00000058, &getSchemaCDBCamera },  // Cameras
+        { 0x0000005a, &getSchemaCRPGMaterial },  // RPGMaterials
+        { 0x0000005b, &getSchemaCDBAutoLoadScript },  // AutoLoadScripts
+        { 0x00000061, &getSchemaCDBDialog },  // Dialogs
+        { 0x00000067, &getSchemaCDBDialogSeq },  // DialogSeqs
+        { 0x00000068, &getSchemaCDBDialogPers },  // DialogPers
+        { 0x00000069, &getSchemaCDBMinesConstants },  // RPGMinesConstants
+        { 0xe0000005, &getSchemaCRPGArmor },  // RPGArmors
+        { 0xe000000c, &getSchemaCScript },  // Scripts
+        { 0xe0000010, &getSchemaCRPGItem2Uniform },  // RPGItem2Uniforms
+        { 0xe0000018, &getSchemaCRPGStoreItem },  // RPGStoreItems
     };
     *outCount = sizeof(entries) / sizeof(entries[0]);
     return entries;
