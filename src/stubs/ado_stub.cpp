@@ -143,13 +143,29 @@ void NDatabase::Refresh(int /*nTableID*/)
 // instances and InsertRecord them into the matching CDBTableBase's
 // records hash_map. Records remain field-default (body decode is a
 // separate future round) — sufficient to clear BasicDB.h:102 asserts.
+// r25: SEH-guarded Import call — Import() bodies often have cross-table
+// refs (GetGeometry, GetTable<T>) that can deref null/garbage when fields
+// aren't filled yet. We don't care if Import crashes — we just want the
+// (col_name → field_addr) map it builds via ImportField before crashing.
+static int s_seh_capturedCount = 0;
+static void CallImportSEHGuarded(CDBRecord* rec, FieldMap* fm)
+{
+    s_currentMap = fm;
+    s_seh_capturedCount = 0;
+    __try {
+        rec->Import();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        // swallow — fm has whatever ImportField managed to record before the crash
+    }
+    s_currentMap = NULL;
+}
+
 // r24: fill record fields from storage row data using captured FieldMap
 static void FillRecordFromRow(CDBRecord* rec, CDBTableDataStorage* s, int row)
 {
     FieldMap fm;
-    s_currentMap = &fm;
-    rec->Import();  // populates fm via ImportField stubs (no ASSERT now)
-    s_currentMap = NULL;
+    CallImportSEHGuarded(rec, &fm);
 
     // c6 int columns
     if (row < (int)s->m_buckets.size()) {
@@ -305,15 +321,26 @@ static void PromoteRecordsFromStorage()
         }
     }
     if (dump) fclose(dump);
-    // r24 Phase 2 disabled — rec->Import() triggers cross-table calls that
-    // crash with access violations even after r22's basic promote populates
-    // all tables' records. Keeping just Phase 1's row-correct ID promote
-    // (each m_buckets[row][0] is the actual primary key for that row).
-    (void)nFieldsFilled;
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r24_promote.log", "w");
+    // r25 Phase 2: SEH-guarded Import + fill for each record
+    for (NDatabase::CTablesHash::iterator it = tables.begin(); it != tables.end(); ++it) {
+        int nTableID = it->first;
+        CDBTableBase& table = it->second;
+        CDBTableDataStorage* s = table.GetStorage();
+        if (!s) continue;
+        int nRows = (int)s->m_buckets.size();
+        for (int row = 0; row < nRows; ++row) {
+            if (s->m_buckets[row].empty()) continue;
+            int recordID = s->m_buckets[row][0];
+            CDBRecord* rec = table.GetDBRecord(recordID);
+            if (!rec) continue;
+            FillRecordFromRow(rec, s, row);
+            ++nFieldsFilled;
+        }
+    }
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r25_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r24: promoted %d records (rows from m_buckets) from %d/%d tables\n",
-                nPromoted, nMatched, nTotalTables);
+        fprintf(fp, "r25: promoted %d records, filled %d via SEH-guarded Import (%d/%d tables)\n",
+                nPromoted, nFieldsFilled, nMatched, nTotalTables);
         fclose(fp);
     }
 }

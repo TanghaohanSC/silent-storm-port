@@ -73,6 +73,7 @@ target_compile_definitions(silent_storm_ado_stub PRIVATE
     _HAS_CXX17=0
 )
 target_compile_options(silent_storm_ado_stub PRIVATE /W0 /permissive /Zc:noexceptTypes-
+    /EHa  # r25: SEH support so __try/__except can guard rec->Import() calls
     /FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h)
 
 # --- LifeStudioHeadAPI permanent header-only stub ---
