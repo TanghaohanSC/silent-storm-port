@@ -76,6 +76,9 @@ add_jan03_subproject(MiscDll)
 
 target_link_libraries(jan03_FileIO PUBLIC jan03::Misc jan03::MemoryMngr)
 target_link_libraries(jan03_DBFormat PUBLIC jan03::Misc jan03::FileIO)
+# r54: DataFormat.cpp now back-pops file-local CRndModel/CRndConstructionPart
+# variants directly from CDBTableDataStorage rows — needs the storage header.
+target_include_directories(jan03_DBFormat PRIVATE ${CMAKE_SOURCE_DIR}/src/stubs)
 target_link_libraries(jan03_Image PUBLIC jan03::Misc jan03::zlib jan03::libpng)
 target_include_directories(jan03_Image PRIVATE ${CMAKE_SOURCE_DIR}/src/stubs/s3tc_shim)  # proprietary S3TC SDK stub
 target_link_libraries(jan03_FModSound PUBLIC jan03::Misc silent_storm_fmod_stub)

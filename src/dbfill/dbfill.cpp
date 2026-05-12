@@ -33,6 +33,12 @@ extern "C" int PortFillAllRecordsFromStorage();
 // so we replay the back-population here in one sweep.
 extern "C" int PortBackPopulateVariants();
 
+// r54: file-local record classes CRndModel / CRndConstructionPart can't be
+// touched from this TU. Upstream's DataFormat.cpp now exposes two C-linkage
+// wrappers that perform the back-pop from inside the DBFormat library.
+extern "C" int PortBackPopRndModels_r54();
+extern "C" int PortBackPopRndConstructionParts_r54();
+
 namespace {
 
 // Build (col_name -> index) maps once per table — m_columnN vectors don't
@@ -517,11 +523,11 @@ extern "C" int PortBackPopulateVariants()
     }
 
     // === CRndModel -> CTRndModel::variants ===========================
-    // r49 NOTE: CRndModel is defined in DataFormat.cpp's NDb namespace —
-    // forward-decl-only in the public header. Cannot dereference its members
-    // from this TU. Skipped; if needed for terrain rendering, move the class
-    // definition into DataFormat.h or stage a second TU compiled inside the
-    // DBFormat directory.
+    // r54: CRndModel is file-local to DataFormat.cpp's NDb namespace, so we
+    // can't iterate its table from this TU. Upstream r54 added an extern "C"
+    // hook PortBackPopRndModels_r54() inside DBFormat that performs the
+    // back-pop inside its own TU (where CRndModel's full def is visible).
+    nRndModel = PortBackPopRndModels_r54();
 
     // === CEffect -> CTEffect::variants ===============================
     {
@@ -596,8 +602,9 @@ extern "C" int PortBackPopulateVariants()
     }
 
     // === CRndConstructionPart -> CTConstructionPart::variants ========
-    // r49 NOTE: same as CRndModel — defined inline in DataFormat.cpp's NDb
-    // namespace; not visible here. Skipped.
+    // r54: see CRndModel comment above. Same trick — extern "C" hook in
+    // DataFormat.cpp.
+    nRndCP = PortBackPopRndConstructionParts_r54();
 
     // === CExplosion -> CTemplVariant::explosions =====================
     {
