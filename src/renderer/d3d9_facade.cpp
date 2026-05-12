@@ -207,11 +207,23 @@ HRESULT __stdcall D3D9Facade::GetSwapChain(UINT /*iSwapChain*/, IDirect3DSwapCha
 UINT __stdcall D3D9Facade::GetNumberOfSwapChains() { return 1; }
 
 // ---------------------------------------------------------------------------
-// Reset — keeps the facade alive; Nival calls this on lost device
+// Reset — keeps the facade alive; Nival calls this on lost device.
+// Phase 1.5 r2: actually call bgfx::reset() so the back-buffer grows from the
+// tiny 100x100 we bootstrapped at, to Nival's chosen mode (e.g. 1024x768).
 // ---------------------------------------------------------------------------
 HRESULT __stdcall D3D9Facade::Reset(D3DPRESENT_PARAMETERS* pPP) {
     if (!pPP) return D3DERR_INVALIDCALL;
-    // In Task 9 we'll call bgfx::reset() here. For now, accept the call.
+    if (pPP->BackBufferWidth > 0 && pPP->BackBufferHeight > 0) {
+        FILE* _f = nullptr; fopen_s(&_f, "silent_storm_smfc.log", "a");
+        if (_f) {
+            fprintf(_f, "  D3D9Facade::Reset -> bgfx::reset(%u,%u)\n",
+                    pPP->BackBufferWidth, pPP->BackBufferHeight);
+            fclose(_f);
+        }
+        silent_storm::renderer::on_resize(
+            static_cast<int>(pPP->BackBufferWidth),
+            static_cast<int>(pPP->BackBufferHeight));
+    }
     return D3D_OK;
 }
 
@@ -372,15 +384,13 @@ HRESULT __stdcall D3D9Facade::ColorFill(IDirect3DSurface9* /*pSurface*/, CONST R
                                           D3DCOLOR /*color*/) {
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRT) {
-    // Phase 1: route distinct render targets to distinct bgfx view IDs.
-    // RenderTargetIndex 0 + null pRT means "back to the main framebuffer".
-    if (RenderTargetIndex == 0 && pRT == nullptr) {
-        current_view_id_ = 0;
-    } else {
-        // Bump view id with each new RT; this is naive but keeps draws separated.
-        if (current_view_id_ < 250) ++current_view_id_;
-    }
+HRESULT __stdcall D3D9Facade::SetRenderTarget(DWORD /*RenderTargetIndex*/, IDirect3DSurface9* /*pRT*/) {
+    // Phase 1.5: pin everything to view 0 (the swapchain).  Distinct bgfx
+    // framebuffers for offscreen render targets are deferred to Phase 2 — for
+    // now Nival's screen/register/texture targets all collapse onto the
+    // back-buffer so we at least see the back-buffer content (clear color,
+    // any UI tris that happen to submit through DrawPrimitive*).
+    current_view_id_ = 0;
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetRenderTarget(DWORD /*RenderTargetIndex*/, IDirect3DSurface9** ppRT) {
