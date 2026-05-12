@@ -60,4 +60,10 @@ extern "C" {
 void ss_dbg_text_push(int virtX, int virtY, unsigned attr, const char* text);
 // Set the "frame banner" message shown on row 0.  text == NULL clears it.
 void ss_dbg_text_banner(const char* text);
+// Queue a colored quad for this frame in 1024x768 virtual coords.  abgr is
+// little-endian 0xAABBGGRR.  Cleared automatically at end_frame().  Used by
+// CTextDraw/CImageDraw to indicate the *real* bounding rect on screen even
+// before font/texture geometry is wired up — flushed via ss_ui shader on
+// view 0 alongside the dbg_tri.
+void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2, unsigned abgr);
 } // extern "C"

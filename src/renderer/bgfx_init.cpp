@@ -3,6 +3,7 @@
 #include "d3d9_facade.h"
 #include "../config/config.h"
 #include <bgfx/bgfx.h>
+#include <bgfx/defines.h>
 #include <bgfx/platform.h>
 #include <cstdarg>
 #include <cstdio>
@@ -57,6 +58,14 @@ constexpr int kDbgTextCap = 32;
 DbgTextEntry g_dbg_text[kDbgTextCap];
 int g_dbg_text_count = 0;
 char g_dbg_text_banner[160] = {};
+
+// Colored-rect queue (Phase 1.5 r3 iter 5).  Drawn via ss_ui as a couple of
+// triangles per quad so the user can see Nival's UI element bounding boxes
+// over the clear color, even before the textured-quad path lands.
+struct DbgRectEntry { int x1, y1, x2, y2; uint32_t abgr; };
+constexpr int kDbgRectCap = 64;
+DbgRectEntry g_dbg_rect[kDbgRectCap];
+int g_dbg_rect_count = 0;
 
 int get_width()     { return g_width; }
 int get_height()    { return g_height; }
@@ -173,6 +182,67 @@ void end_frame() {
     }
     g_dbg_text_count = 0;
 
+    // Phase 1.5 r3 iter 5: flush the colored-rect queue via the ss_ui
+    // shader so callers (CTextDraw / CImageDraw) get *real* triangles on
+    // screen, not just dbg-text labels.  Each rect = 2 triangles in NDC.
+    // ss_ui samples s_diffuse so we bind a lazily-created 1x1 white texture
+    // and supply texcoord(0,0) on every vertex; output = white * v_color0.
+    if (g_dbg_rect_count > 0) {
+        static bgfx::VertexLayout s_layout;
+        static bgfx::TextureHandle s_white = BGFX_INVALID_HANDLE;
+        static bool s_init = false;
+        if (!s_init) {
+            s_layout
+                .begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+                .end();
+            const uint32_t white_px = 0xffffffffu;
+            const bgfx::Memory* mem = bgfx::copy(&white_px, sizeof(white_px));
+            s_white = bgfx::createTexture2D(1, 1, false, 1,
+                                            bgfx::TextureFormat::BGRA8,
+                                            BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE, mem);
+            s_init = true;
+        }
+
+        struct V { float x, y, z; float u, v; uint32_t abgr; };
+        const int verts_needed = g_dbg_rect_count * 6;
+        if (bgfx::getAvailTransientVertexBuffer(verts_needed, s_layout) >= (uint32_t)verts_needed) {
+            bgfx::TransientVertexBuffer tvb;
+            bgfx::allocTransientVertexBuffer(&tvb, verts_needed, s_layout);
+            V* dst = reinterpret_cast<V*>(tvb.data);
+            for (int i = 0; i < g_dbg_rect_count; ++i) {
+                const auto& r = g_dbg_rect[i];
+                // 1024x768 virt -> NDC (-1..+1).  D3D Y-axis: flip so y=0 is top.
+                float x1 =  (r.x1 / 512.0f) - 1.0f;
+                float x2 =  (r.x2 / 512.0f) - 1.0f;
+                float y1 = 1.0f - (r.y1 / 384.0f);
+                float y2 = 1.0f - (r.y2 / 384.0f);
+                uint32_t c = r.abgr;
+                dst[0] = { x1, y1, 0.0f, 0,0, c };
+                dst[1] = { x2, y1, 0.0f, 1,0, c };
+                dst[2] = { x2, y2, 0.0f, 1,1, c };
+                dst[3] = { x1, y1, 0.0f, 0,0, c };
+                dst[4] = { x2, y2, 0.0f, 1,1, c };
+                dst[5] = { x1, y2, 0.0f, 0,1, c };
+                dst += 6;
+            }
+
+            float ident[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            bgfx::setViewTransform(0, ident, ident);
+            bgfx::setTransform(ident);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                           BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA));
+            bgfx::setVertexBuffer(0, &tvb, 0, (uint32_t)verts_needed);
+            bgfx::setTexture(0, get_sampler_uniform(0), s_white);
+            bgfx::ProgramHandle prog = get_program("ss_ui");
+            if (bgfx::isValid(prog)) bgfx::submit(0, prog);
+            else                     bgfx::discard();
+        }
+        g_dbg_rect_count = 0;
+    }
+
     bgfx::frame();
 }
 
@@ -220,5 +290,15 @@ extern "C" void ss_dbg_text_banner(const char* text) {
         ++n;
     }
     silent_storm::renderer::g_dbg_text_banner[n] = '\0';
+}
+
+extern "C" void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2, unsigned abgr) {
+    int idx = silent_storm::renderer::g_dbg_rect_count;
+    if (idx >= silent_storm::renderer::kDbgRectCap) return;
+    auto& r = silent_storm::renderer::g_dbg_rect[idx];
+    r.x1 = virtX1; r.y1 = virtY1;
+    r.x2 = virtX2; r.y2 = virtY2;
+    r.abgr = abgr;
+    ++silent_storm::renderer::g_dbg_rect_count;
 }
 
