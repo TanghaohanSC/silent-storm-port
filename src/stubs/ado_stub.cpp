@@ -41,16 +41,16 @@ using namespace std;
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\FileIO\BasicChunk1.h"
 #include "db_table_storage.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
-// silent-storm-port r19: shipping NDatabase::Serialize writes a SECOND field
-// beyond Jan03's `f.Add(1, &tables)` — a `hash_map<int, CObj<CDBTableDataStorage>>`
-// keyed directly by nTableID. Recovered via Ghidra-decompile of MapEdit's
-// FUN_0044DD50 (the wire-level Serialize entry). We declare the same global
-// here so our Serialize reads it and PromoteRecords can wire data back to
-// CDBTableBase::records hash_maps.
-typedef std::hash_map<int, CObj<CDBTableDataStorage> > CStorageHash;
-static CStorageHash& GetStorageMap()
+// silent-storm-port r20: Ghidra-RE of FUN_0044BBF0 (returns the field 2 global)
+// shows a 40-byte heap-allocated struct with self-referencing next/prev at
+// offsets 0 and 4 — a doubly-linked-list head sentinel. So shipping NDatabase
+// holds storages in `std::list<CObj<CDBTableDataStorage>>` (ordered, no keys),
+// not a hash_map. Wire dispatches through BasicChunk1.h's std::list template
+// which writes/reads N CObj refs as sub-chunks 1..N.
+typedef std::list<CObj<CDBTableDataStorage> > CStorageList;
+static CStorageList& GetStorageList()
 {
-    static CStorageHash s_storage;
+    static CStorageList s_storage;
     return s_storage;
 }
 
@@ -133,49 +133,40 @@ void NDatabase::Refresh(int /*nTableID*/)
 // instances and InsertRecord them into the matching CDBTableBase's
 // records hash_map. Records remain field-default (body decode is a
 // separate future round) — sufficient to clear BasicDB.h:102 asserts.
-static void PromoteRecordsFromStorageMap()
+static void PromoteRecordsFromStorageList()
 {
-    NDatabase::CTablesHash& tables = NDatabase::GetTables();
-    CStorageHash& storageMap = GetStorageMap();
-    CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
+    CStorageList& storageList = GetStorageList();
+    int nTotal = (int)storageList.size();
     int nPromoted = 0;
-    int nUnmatched = 0;
-    int nStorages = (int)storageMap.size();
-    for (CStorageHash::iterator it = storageMap.begin(); it != storageMap.end(); ++it) {
-        int nTableID = it->first;
-        CDBTableDataStorage* storage = it->second.GetPtr();
-        if (!storage) continue;
-        NDatabase::CTablesHash::iterator tk = tables.find(nTableID);
-        if (tk == tables.end()) { ++nUnmatched; continue; }
-        CDBTableBase* pTable = &tk->second;
-        for (size_t i = 0; i < storage->m_records.size(); ++i) {
-            CDBRecord* p = factory.CreateObject(nTableID);
-            if (p) {
-                pTable->InsertRecord(storage->m_records[i].id, p);
-                ++nPromoted;
-            }
-        }
-    }
-    storageMap.clear();
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r19_promote.log", "w");
+    // r20: no key info in std::list — for now just count + log the sizes.
+    // Mapping list-index → nTableID comes in the next round.
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r20_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r19 promoted %d records from %d matched storages (%d unmatched, %d total)\n",
-                nPromoted, nStorages - nUnmatched, nUnmatched, nStorages);
+        fprintf(fp, "r20: read %d storage entries from wire field 2 (std::list form)\n", nTotal);
+        int i = 0;
+        for (CStorageList::iterator it = storageList.begin(); it != storageList.end() && i < 20; ++it, ++i) {
+            CDBTableDataStorage* s = it->GetPtr();
+            if (s) fprintf(fp, "  storage[%d]: %d records, c6=%d cols\n",
+                           i, (int)s->m_records.size(), (int)s->m_column6.size());
+            else fprintf(fp, "  storage[%d]: NULL\n", i);
+        }
         fclose(fp);
     }
+    storageList.clear();
+    (void)nPromoted;
 }
 
 void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
 {
     CTablesHash& tables = GetTables();
-    CStorageHash& storageMap = GetStorageMap();
+    CStorageList& storageList = GetStorageList();
     NDatabase::bIsDatabaseLoading = true;
     {
         CStructureSaver f(file, mode);
-        f.Add(1, &tables);          // Jan03 + shipping field 1: tables hash_map
-        f.Add(2, &storageMap);      // shipping field 2: storage map (r19 discovery)
+        f.Add(1, &tables);          // field 1: tables hash_map (Jan03 compatible)
+        f.Add(2, &storageList);     // field 2: std::list of storage refs (r20)
     }
-    PromoteRecordsFromStorageMap();
+    PromoteRecordsFromStorageList();
     NDatabase::bIsDatabaseLoading = false;
 }
 
