@@ -38,6 +38,7 @@ add_subdirectory(src/stubs)
 add_subdirectory(src/config)
 add_subdirectory(src/platform)
 add_subdirectory(src/renderer)
+add_subdirectory(src/shaders)    # Phase 1 T8: bgfx shader archetypes
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.
 # Start with the leaf vendored libs (zlib, libpng) — no PCH, pure C,
