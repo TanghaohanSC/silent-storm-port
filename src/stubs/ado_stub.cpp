@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <list>
+#include <map>
 #include <string>
 #include <vector>
 #include <typeinfo>
@@ -46,6 +47,22 @@ using namespace std;
 // CDBTableBase itself (CObj<CDBTableDataStorage> m_storage). PromoteRecords
 // walks NDatabase::tables, materializing each table's records cache from its
 // m_storage.
+
+// r24: ImportField captures (col_name → field_addr) per-record via a
+// thread-local map. Then row data from storage is written into those addresses
+// using column-name match against m_column6/7/8.
+namespace {
+    struct FieldMap {
+        std::map<std::string, int*>           ints;
+        std::map<std::string, bool*>          bools;
+        std::map<std::string, float*>         floats;
+        std::map<std::string, std::string*>   strings;
+        std::map<std::string, std::wstring*>  wstrings;
+        struct RefInfo { CDBRecord** addr; CDBTableBase* dest; };
+        std::map<std::string, RefInfo>        refs;
+    };
+    static FieldMap* s_currentMap = NULL;
+}
 
 namespace NDatabase
 {
@@ -126,11 +143,63 @@ void NDatabase::Refresh(int /*nTableID*/)
 // instances and InsertRecord them into the matching CDBTableBase's
 // records hash_map. Records remain field-default (body decode is a
 // separate future round) — sufficient to clear BasicDB.h:102 asserts.
+// r24: fill record fields from storage row data using captured FieldMap
+static void FillRecordFromRow(CDBRecord* rec, CDBTableDataStorage* s, int row)
+{
+    FieldMap fm;
+    s_currentMap = &fm;
+    rec->Import();  // populates fm via ImportField stubs (no ASSERT now)
+    s_currentMap = NULL;
+
+    // c6 int columns
+    if (row < (int)s->m_buckets.size()) {
+        const std::vector<int>& intCols = s->m_buckets[row];
+        for (size_t j = 0; j < s->m_column6.size() && j < intCols.size(); ++j) {
+            const std::string& cname = s->m_column6[j];
+            std::map<std::string, int*>::iterator it_i = fm.ints.find(cname);
+            if (it_i != fm.ints.end()) { *it_i->second = intCols[j]; continue; }
+            std::map<std::string, bool*>::iterator it_b = fm.bools.find(cname);
+            if (it_b != fm.bools.end()) { *it_b->second = intCols[j] != 0; continue; }
+            // refs (CPtr<T>): value is record ID, resolve via target table
+            std::map<std::string, FieldMap::RefInfo>::iterator it_r = fm.refs.find(cname);
+            if (it_r != fm.refs.end()) {
+                int refID = intCols[j];
+                if (refID > 0 && it_r->second.dest) {
+                    *it_r->second.addr = it_r->second.dest->GetDBRecord(refID);
+                }
+                continue;
+            }
+        }
+    }
+    // c7 float columns (stored as int bits)
+    if (row < (int)s->m_chainNext.size()) {
+        const std::vector<int>& fCols = s->m_chainNext[row];
+        for (size_t j = 0; j < s->m_column7.size() && j < fCols.size(); ++j) {
+            const std::string& cname = s->m_column7[j];
+            std::map<std::string, float*>::iterator it = fm.floats.find(cname);
+            if (it != fm.floats.end()) {
+                int bits = fCols[j];
+                *it->second = *reinterpret_cast<float*>(&bits);
+            }
+        }
+    }
+    // c8 wstring columns
+    if (row < (int)s->m_wstrings.size()) {
+        const std::vector<std::wstring>& wCols = s->m_wstrings[row];
+        for (size_t j = 0; j < s->m_column8.size() && j < wCols.size(); ++j) {
+            const std::string& cname = s->m_column8[j];
+            std::map<std::string, std::wstring*>::iterator it = fm.wstrings.find(cname);
+            if (it != fm.wstrings.end()) *it->second = wCols[j];
+        }
+    }
+}
+
 static void PromoteRecordsFromStorage()
 {
     NDatabase::CTablesHash& tables = NDatabase::GetTables();
     CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
     int nMatched = 0, nPromoted = 0, nTotalTables = (int)tables.size();
+    int nFieldsFilled = 0;
     // r23: dump body byte stats to reverse-engineer record body format
     FILE* dump = NULL; fopen_s(&dump, "silent_storm_r23_body_dump.log", "w");
     int dumped = 0;
@@ -222,18 +291,28 @@ static void PromoteRecordsFromStorage()
             }
             ++dumped;
         }
-        for (size_t i = 0; i < s->m_records.size(); ++i) {
+        // r24: rows are in m_buckets (per-row int values). Each row is one record.
+        int nRows = (int)s->m_buckets.size();
+        for (int row = 0; row < nRows; ++row) {
+            if (row >= (int)s->m_buckets.size() || s->m_buckets[row].empty()) continue;
+            int recordID = s->m_buckets[row][0];  // first int column is always "ID"
+            if (recordID <= 0) continue;
             CDBRecord* p = factory.CreateObject(nTableID);
             if (p) {
-                table.InsertRecord(s->m_records[i].id, p);
+                table.InsertRecord(recordID, p);  // InsertRecord (friend) sets nID
                 ++nPromoted;
             }
         }
     }
     if (dump) fclose(dump);
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r21_promote.log", "w");
+    // r24 Phase 2 disabled — rec->Import() triggers cross-table calls that
+    // crash with access violations even after r22's basic promote populates
+    // all tables' records. Keeping just Phase 1's row-correct ID promote
+    // (each m_buckets[row][0] is the actual primary key for that row).
+    (void)nFieldsFilled;
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r24_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r21: promoted %d records from %d/%d tables with storage\n",
+        fprintf(fp, "r24: promoted %d records (rows from m_buckets) from %d/%d tables\n",
                 nPromoted, nMatched, nTotalTables);
         fclose(fp);
     }
@@ -256,14 +335,32 @@ void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
 }
 
 // r17 attempt rolled back: ImportField probing requires fully-loaded tables.
-void NDatabase::ImportField(const char*, int*)            { ASSERT(0); }
-void NDatabase::ImportField(const char*, bool*)           { ASSERT(0); }
-void NDatabase::ImportField(const char*, float*)          { ASSERT(0); }
-void NDatabase::ImportField(const char*, std::string*)    { ASSERT(0); }
-void NDatabase::ImportField(const char*, std::wstring*)   { ASSERT(0); }
-void NDatabase::ImportField(const char*, CDBRecord**, CDBTableBase*) { ASSERT(0); }
+// r24: ImportField recorder mode — when s_currentMap is set, captures
+// (col_name, field_addr) into the map. When unset, no-op (was ASSERT before).
+void NDatabase::ImportField(const char* n, int* p) {
+    if (s_currentMap && n && p) s_currentMap->ints[n] = p;
+}
+void NDatabase::ImportField(const char* n, bool* p) {
+    if (s_currentMap && n && p) s_currentMap->bools[n] = p;
+}
+void NDatabase::ImportField(const char* n, float* p) {
+    if (s_currentMap && n && p) s_currentMap->floats[n] = p;
+}
+void NDatabase::ImportField(const char* n, std::string* p) {
+    if (s_currentMap && n && p) s_currentMap->strings[n] = p;
+}
+void NDatabase::ImportField(const char* n, std::wstring* p) {
+    if (s_currentMap && n && p) s_currentMap->wstrings[n] = p;
+}
+void NDatabase::ImportField(const char* n, CDBRecord** p, CDBTableBase* dest) {
+    if (s_currentMap && n && p) {
+        FieldMap::RefInfo ri = {p, dest};
+        s_currentMap->refs[n] = ri;
+        *p = NULL;  // safe default — template version casts NULL to CPtr<T>
+    }
+}
 void NDatabase::ImportRelation(CDBRecord*, CDBTableBase*,
-                                std::vector<CPtr<CDBRecord> >*) { ASSERT(0); }
+                                std::vector<CPtr<CDBRecord> >*) { /* no-op */ }
 
 std::string NDatabase::GetDBConnectionStr(const std::string& szDBName)
 {
