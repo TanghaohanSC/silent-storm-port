@@ -139,6 +139,15 @@ bool load_all_archetypes(const char* shader_dir) {
     log_line("[shader_registry] loaded %d/%d archetypes from %s",
              loaded, int(sizeof(k_archetypes)/sizeof(*k_archetypes)),
              root.string().c_str());
+
+    // Phase 1.5 r2 iter 5: verify the registry round-trip works for every
+    // archetype name string. (Catches typos / case-mismatches between the
+    // load path and state_translator::select_shader_archetype.)
+    for (const char* name : k_archetypes) {
+        bgfx::ProgramHandle p = get_program(name);
+        log_line("[shader_registry]   get_program(\"%s\") -> idx=%u valid=%d",
+                 name, p.idx, (int)bgfx::isValid(p));
+    }
     return loaded > 0;
 }
 

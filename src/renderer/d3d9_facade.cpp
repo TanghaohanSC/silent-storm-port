@@ -316,6 +316,60 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
             fflush(f);
         }
     }
+
+    // Phase 1.5 r2 iter 5: submit a debug "I am alive" colored triangle once
+    // per frame so we can validate the actual shader/vertex pipeline end-to-end.
+    // Drawn in screen-space NDC via the ss_ui shader (no transforms needed).
+    // Removed when real geometry submits start arriving from Nival's draw path.
+    {
+        static bgfx::VertexLayout s_layout;
+        static bool s_layout_init = false;
+        if (!s_layout_init) {
+            s_layout
+                .begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+                .end();
+            s_layout_init = true;
+        }
+
+        struct DbgVert { float x, y, z; uint32_t abgr; };
+        // Three corners in NDC (-1..+1).  Colors: R/G/B.  Compact triangle in
+        // top-right so it doesn't fight the bgfx debug-text overlay (top-left).
+        DbgVert verts[3] = {
+            {  0.30f,  0.55f, 0.0f, 0xff0000ffu },   // red
+            {  0.85f,  0.55f, 0.0f, 0xff00ff00u },   // green
+            {  0.575f, 0.95f, 0.0f, 0xffff0000u },   // blue
+        };
+        if (bgfx::getAvailTransientVertexBuffer(3, s_layout) >= 3) {
+            bgfx::TransientVertexBuffer tvb;
+            bgfx::allocTransientVertexBuffer(&tvb, 3, s_layout);
+            std::memcpy(tvb.data, verts, sizeof(verts));
+
+            // Identity transforms — vertices are already in clip-space.
+            float ident[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            bgfx::setViewTransform(current_view_id_, ident, ident);
+            bgfx::setTransform(ident);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            bgfx::setVertexBuffer(0, &tvb);
+
+            bgfx::ProgramHandle prog = get_program("ss_ui");
+            if (bgfx::isValid(prog)) {
+                bgfx::submit(current_view_id_, prog);
+                static int once_tri = 0;
+                if (once_tri < 3) {
+                    ++once_tri;
+                    if (FILE* f = draw_log()) {
+                        fprintf(f, "[dbg_tri#%d] submitted via ss_ui\n", once_tri);
+                        fflush(f);
+                    }
+                }
+            } else {
+                bgfx::discard();
+            }
+        }
+    }
+
     silent_storm::renderer::end_frame();
     scene_active_ = false;
     return D3D_OK;
