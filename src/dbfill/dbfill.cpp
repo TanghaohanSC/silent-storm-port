@@ -60,7 +60,10 @@ static inline void* FieldAddr(CDBRecord* rec, const NDb::SColumnInfo& col)
 // Read row data for `recordID` from storage. Storage rows are addressed by
 // the row index where m_buckets[row][0] (the "ID" column at intCols index 0)
 // equals recordID. We discover rows on the fly per table.
-static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE* log)
+// `refsFilledOut` accumulates count of type=5 (ref / CPtr<T>) columns that
+// were successfully resolved across all rows in this table.
+static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE* log,
+                        int* refsFilledOut, int* refsMissedOut)
 {
     CDBTableDataStorage* s = table->GetStorage();
     if (!s) return 0;
@@ -69,6 +72,8 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
     BuildColIdx(idx, s);
 
     int filled = 0;
+    int refsFilled = 0;
+    int refsMissed = 0;
     int nRows = (int)s->m_buckets.size();
     for (int row = 0; row < nRows; ++row) {
         if (s->m_buckets[row].empty()) continue;
@@ -136,14 +141,40 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
                     }
                     break;
                 }
-                case 5: // ref (CPtr<T>) — deferred to a later round
+                case 5: { // ref (CPtr<T>) — cross-table reference resolution
+                    // refID stored as an int in the same m_buckets column slot
+                    // as other ints (column metadata in m_column6 names it).
+                    std::map<std::string, int>::const_iterator it = idx.intCols.find(cname);
+                    if (it == idx.intCols.end()) { ++refsMissed; break; }
+                    int j = it->second;
+                    if (j >= (int)s->m_buckets[row].size()) { ++refsMissed; break; }
+                    int refID = s->m_buckets[row][j];
+                    if (refID <= 0) { break; }  // legitimate null ref
+                    if (!c->refClass) { ++refsMissed; break; }
+                    int targetTableID = NDb::GetTableIDForClassName(c->refClass);
+                    if (targetTableID < 0) { ++refsMissed; break; }
+                    CDBTableBase* pTargetTable = NDatabase::GetTable(targetTableID);
+                    if (!pTargetTable) { ++refsMissed; break; }
+                    CDBRecord* pRefTarget = pTargetTable->GetDBRecord(refID);
+                    if (!pRefTarget) { ++refsMissed; break; }
+                    // CPtr<T> stores a single raw pointer field; write through
+                    // as a CDBRecord*. We skip refcount bumps — records live
+                    // for the duration of the load so leak/GC is moot.
+                    *reinterpret_cast<CDBRecord**>(FieldAddr(rec, *c)) = pRefTarget;
+                    ++refsFilled;
+                    ++filled;
+                    break;
+                }
                 default:
                     break;
             }
         }
     }
+    if (refsFilledOut) *refsFilledOut += refsFilled;
+    if (refsMissedOut) *refsMissedOut += refsMissed;
     if (log) {
-        fprintf(log, "  fill table: %d rows, %d field-writes\n", nRows, filled);
+        fprintf(log, "  fill table: %d rows, %d field-writes (refs filled=%d missed=%d)\n",
+                nRows, filled, refsFilled, refsMissed);
     }
     return filled;
 }
@@ -155,14 +186,17 @@ extern "C" int PortFillAllRecordsFromStorage()
     int nSchemas = 0;
     const NDb::SSchemaEntry* schemas = NDb::GetAllSchemas(&nSchemas);
 
+    // r30: write our own log so ado_stub's outer summary doesn't clobber it.
     FILE* log = 0;
-    fopen_s(&log, "silent_storm_r29_promote.log", "w");
+    fopen_s(&log, "silent_storm_r30_dbfill.log", "w");
     if (log) {
-        fprintf(log, "r29 dbfill: walking %d registered schemas\n", nSchemas);
+        fprintf(log, "r30 dbfill: walking %d registered schemas\n", nSchemas);
     }
 
     int totalWritten = 0;
     int tablesHit = 0;
+    int totalRefsFilled = 0;
+    int totalRefsMissed = 0;
     for (int i = 0; i < nSchemas; ++i) {
         const NDb::SSchemaEntry& e = schemas[i];
         CDBTableBase* table = NDatabase::GetTable(e.typeID);
@@ -172,14 +206,16 @@ extern "C" int PortFillAllRecordsFromStorage()
         }
         if (log) fprintf(log, "schema[0x%08X]:\n", e.typeID);
         const NDb::SColumnInfo* cols = e.getter();
-        int n = FillOneTable(table, cols, log);
+        int n = FillOneTable(table, cols, log, &totalRefsFilled, &totalRefsMissed);
         if (n > 0) ++tablesHit;
         totalWritten += n;
     }
 
     if (log) {
-        fprintf(log, "r29 dbfill: total %d field-writes across %d/%d tables\n",
+        fprintf(log, "r30 dbfill: total %d field-writes across %d/%d tables\n",
                 totalWritten, tablesHit, nSchemas);
+        fprintf(log, "r30 dbfill: refs filled=%d, refs missed=%d\n",
+                totalRefsFilled, totalRefsMissed);
         fclose(log);
     }
     return totalWritten;

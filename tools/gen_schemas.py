@@ -145,12 +145,13 @@ class HeaderInfo:
     class_to_header: dict
 
 
-# Match a member declaration. Captures: full type, name, optional array suffix.
-# Examples:
+# Match a member declaration. Captures: full type plus a comma-separated list
+# of names (each possibly followed by an array suffix). Examples:
 #   float fYaw;
 #   CPtr<CString> pText;
 #   string sParam[N_ACK_MAX_PARAM_COUNT];
 #   vector< CPtr<T> > vec;
+#   CPtr<CTexture> pPositiveX, pPositiveY, pPositiveZ;
 MEMBER_RE = re.compile(
     r"""^\s*
         (?P<type>
@@ -160,12 +161,27 @@ MEMBER_RE = re.compile(
             (?:\s*\*)?                                 # optional pointer
         )
         \s+
-        (?P<name>[A-Za-z_]\w*)
-        (?:\s*\[[^\]]*\])?                             # optional array
+        (?P<names>
+            [A-Za-z_]\w*                               # first name
+            (?:\s*\[[^\]]*\])?                         # optional array
+            (?:\s*,\s*[A-Za-z_]\w*(?:\s*\[[^\]]*\])?)* # additional names
+        )
         \s*;
     """,
     re.VERBOSE,
 )
+
+
+def split_member_names(names_blob: str) -> list[str]:
+    """Given the captured comma-separated 'names' chunk from MEMBER_RE, return
+    the bare identifier names (drop any [N] array suffix)."""
+    out = []
+    for piece in names_blob.split(","):
+        piece = piece.strip()
+        m = re.match(r"^([A-Za-z_]\w*)", piece)
+        if m:
+            out.append(m.group(1))
+    return out
 
 
 def map_type_to_code(type_spelling: str) -> int | None:
@@ -188,6 +204,27 @@ def map_type_to_code(type_spelling: str) -> int | None:
     if base in PRIMITIVE_TYPE_MAP:
         return PRIMITIVE_TYPE_MAP[base]
     return None
+
+
+# CPtr<X>, CRndPtr<X>, CDBPtr<X>, CWeakPtr<X> -> inner class name X (stripped
+# of namespace prefix like NDb::). Returns None if not a smart-pointer type.
+SMARTPTR_INNER_RE = re.compile(
+    r"^(?:CPtr|CRndPtr|CDBPtr|CWeakPtr)\s*<\s*([A-Za-z_][\w:]*)\s*>$",
+)
+
+
+def extract_ref_inner_class(type_spelling: str) -> str | None:
+    t = type_spelling.strip()
+    if t.startswith("const "):
+        t = t[len("const ") :].strip()
+    t = t.rstrip("*&").strip()
+    m = SMARTPTR_INNER_RE.match(t)
+    if not m:
+        return None
+    inner = m.group(1).strip()
+    # Strip namespace prefixes (e.g. NDb::CTexture -> CTexture).
+    inner = inner.rsplit("::", 1)[-1]
+    return inner
 
 
 CLASS_HEAD_RE = re.compile(
@@ -246,12 +283,13 @@ def parse_header(path: Path) -> HeaderInfo:
             if not mm:
                 continue
             tname = re.sub(r"\s+", " ", mm.group("type")).strip()
-            mname = mm.group("name")
+            names_blob = mm.group("names")
             # Skip obvious non-members (typedef, using, friend, etc. already
             # filtered by regex). Also reject all-caps macro-ish lines.
             if tname in {"return", "case", "default"}:
                 continue
-            members[mname] = tname
+            for mname in split_member_names(names_blob):
+                members[mname] = tname
         info.classes[cls_name] = members
         info.class_to_header[cls_name] = path.name
     return info
@@ -554,6 +592,19 @@ def resolve_type_code(
     return subfield_name_to_code(sub_member)
 
 
+def resolve_ref_inner_class(
+    class_name: str, outer_member: str, headers: list
+) -> str | None:
+    """If the named member is a CPtr<X>-style field, return X (the target
+    record class). Returns None otherwise."""
+    for hi in headers:
+        if class_name in hi.classes:
+            members = hi.classes[class_name]
+            if outer_member in members:
+                return extract_ref_inner_class(members[outer_member])
+    return None
+
+
 def resolve_outer_struct_type(
     class_name: str, outer_member: str, headers: list
 ) -> str | None:
@@ -646,6 +697,7 @@ def main() -> int:
     lines.append("    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>)")
     lines.append("    int offset;     // offsetof(class, outer_member)")
     lines.append("    int subOffset;  // offsetof(struct, sub_member) for nested fields, else 0")
+    lines.append("    const char* refClass; // for type=5, target record class name (e.g. \"CTexture\"); else nullptr")
     lines.append("};")
     lines.append("")
     lines.append("template<typename T> const SColumnInfo* GetSchemaFor();")
@@ -677,11 +729,16 @@ def main() -> int:
                     sub_expr = f"/* unknown outer type for {call.outer} */ 0"
                 else:
                     sub_expr = f"offsetof({outer_struct}, {call.sub})"
+            ref_expr = "nullptr"
+            if tcode == T_REF and call.sub is None:
+                inner = resolve_ref_inner_class(cls, call.outer, header_infos)
+                if inner is not None:
+                    ref_expr = f'"{inner}"'
             lines.append(
-                f"        {{ {name_lit_padded} {tcode}, {offset_expr}, {sub_expr} }},  // {code_to_comment(tcode)}"
+                f"        {{ {name_lit_padded} {tcode}, {offset_expr}, {sub_expr}, {ref_expr} }},  // {code_to_comment(tcode)}"
             )
             total_cols += 1
-        lines.append("        { nullptr, 0, 0, 0 }  // sentinel")
+        lines.append("        { nullptr, 0, 0, 0, nullptr }  // sentinel")
         lines.append("    };")
         lines.append("    return cols;")
         lines.append("}")
@@ -740,6 +797,35 @@ def main() -> int:
     lines.append("    };")
     lines.append("    *outCount = sizeof(entries) / sizeof(entries[0]);")
     lines.append("    return entries;")
+    lines.append("}")
+    lines.append("")
+
+    # --- className -> nTableID lookup ---
+    # Used by dbfill to resolve type=5 ref columns: column's refClass names a
+    # record class (e.g. "CTexture"); we map that to the nTableID so dbfill
+    # can call NDatabase::GetTable(targetID)->GetDBRecord(refID).
+    lines.append("// ---------------------------------------------------------------------------")
+    lines.append("// Lookup: record class name -> nTableID (for type=5 ref resolution)")
+    lines.append("// ---------------------------------------------------------------------------")
+    lines.append("")
+    lines.append("inline int GetTableIDForClassName(const char* name) {")
+    lines.append("    if (!name) return -1;")
+    lines.append("    struct E { const char* cls; int tid; };")
+    lines.append("    static const E entries[] = {")
+    # Emit ALL classes with REGISTER_DATABASE_CLASS, sorted by class name for
+    # determinism. Don't restrict to parsed_set — a CPtr may target a class
+    # whose Import body we couldn't parse, but the table still exists.
+    db_sorted = sorted(all_db_regs.items(), key=lambda kv: kv[0])
+    for cls, (tid, tname) in db_sorted:
+        lines.append(f'        {{ "{cls}", 0x{tid & 0xFFFFFFFF:08x} }},  // {tname}')
+    lines.append("    };")
+    lines.append("    for (size_t i = 0; i < sizeof(entries)/sizeof(entries[0]); ++i) {")
+    lines.append("        const char* a = entries[i].cls;")
+    lines.append("        const char* b = name;")
+    lines.append("        while (*a && *a == *b) { ++a; ++b; }")
+    lines.append("        if (*a == 0 && *b == 0) return entries[i].tid;")
+    lines.append("    }")
+    lines.append("    return -1;")
     lines.append("}")
     lines.append("")
 
