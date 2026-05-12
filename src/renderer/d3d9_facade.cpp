@@ -308,25 +308,29 @@ HRESULT __stdcall D3D9Facade::CreateDepthStencilSurface(UINT Width, UINT Height,
     *ppSurface = new FacadeSurface(Width, Height, Format);
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* /*pVE*/,
+HRESULT __stdcall D3D9Facade::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* pVE,
                                                         IDirect3DVertexDeclaration9** ppDecl) {
-    if (ppDecl) *ppDecl = nullptr;
-    return E_NOTIMPL;
+    if (!ppDecl) return D3DERR_INVALIDCALL;
+    *ppDecl = new FacadeVertexDeclaration(pVE);
+    return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateVertexShader(CONST DWORD* /*pFunction*/,
+HRESULT __stdcall D3D9Facade::CreateVertexShader(CONST DWORD* pFunction,
                                                    IDirect3DVertexShader9** ppShader) {
-    if (ppShader) *ppShader = nullptr;
-    return E_NOTIMPL;
+    if (!ppShader) return D3DERR_INVALIDCALL;
+    *ppShader = new FacadeVertexShader(pFunction);
+    return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreatePixelShader(CONST DWORD* /*pFunction*/,
+HRESULT __stdcall D3D9Facade::CreatePixelShader(CONST DWORD* pFunction,
                                                   IDirect3DPixelShader9** ppShader) {
-    if (ppShader) *ppShader = nullptr;
-    return E_NOTIMPL;
+    if (!ppShader) return D3DERR_INVALIDCALL;
+    *ppShader = new FacadePixelShader(pFunction);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateStateBlock(D3DSTATEBLOCKTYPE /*Type*/,
                                                 IDirect3DStateBlock9** ppSB) {
-    if (ppSB) *ppSB = nullptr;
-    return E_NOTIMPL;
+    if (!ppSB) return D3DERR_INVALIDCALL;
+    *ppSB = new FacadeStateBlock();
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateOffscreenPlainSurface(UINT Width, UINT Height,
                                                             D3DFORMAT Format, D3DPOOL /*Pool*/,
@@ -336,9 +340,11 @@ HRESULT __stdcall D3D9Facade::CreateOffscreenPlainSurface(UINT Width, UINT Heigh
     *ppSurface = new FacadeSurface(Width, Height, Format);
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateQuery(D3DQUERYTYPE /*Type*/, IDirect3DQuery9** ppQuery) {
-    if (ppQuery) *ppQuery = nullptr;
-    return E_NOTIMPL;
+HRESULT __stdcall D3D9Facade::CreateQuery(D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery) {
+    // Some Nival call-sites pass ppQuery == nullptr just to probe support.
+    if (!ppQuery) return D3D_OK;
+    *ppQuery = new FacadeQuery(Type);
+    return D3D_OK;
 }
 
 // ---------------------------------------------------------------------------

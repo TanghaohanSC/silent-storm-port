@@ -374,6 +374,209 @@ HRESULT __stdcall FacadeCubeTexture::UnlockRect(D3DCUBEMAP_FACES /*face*/, UINT 
 }
 
 // ---------------------------------------------------------------------------
+// FacadeVertexShader
+// ---------------------------------------------------------------------------
+namespace {
+size_t shader_length_dwords(const DWORD* function) {
+    // D3D9 shader bytecode is DWORD-aligned and terminated by 0x0000FFFF.
+    if (!function) return 0;
+    size_t n = 0;
+    const size_t kCap = 1 << 14; // safety cap
+    while (n < kCap) {
+        if (function[n] == 0x0000FFFF) { ++n; break; }
+        ++n;
+    }
+    return n;
+}
+} // namespace
+
+FacadeVertexShader::FacadeVertexShader(const DWORD* fn) {
+    size_t n = shader_length_dwords(fn);
+    function.assign(fn, fn + n);
+}
+FacadeVertexShader::~FacadeVertexShader() = default;
+
+HRESULT __stdcall FacadeVertexShader::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DVertexShader9) {
+        *ppv = static_cast<IDirect3DVertexShader9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadeVertexShader::AddRef()  { return ++ref_count_; }
+ULONG __stdcall FacadeVertexShader::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadeVertexShader::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+HRESULT __stdcall FacadeVertexShader::GetFunction(void* pData, UINT* pSizeOfData) {
+    UINT bytes = static_cast<UINT>(function.size() * sizeof(DWORD));
+    if (!pData) {
+        if (pSizeOfData) *pSizeOfData = bytes;
+        return D3D_OK;
+    }
+    if (!pSizeOfData) return D3DERR_INVALIDCALL;
+    UINT copyBytes = (*pSizeOfData < bytes) ? *pSizeOfData : bytes;
+    if (copyBytes && !function.empty()) std::memcpy(pData, function.data(), copyBytes);
+    *pSizeOfData = bytes;
+    return D3D_OK;
+}
+
+// ---------------------------------------------------------------------------
+// FacadePixelShader
+// ---------------------------------------------------------------------------
+FacadePixelShader::FacadePixelShader(const DWORD* fn) {
+    size_t n = shader_length_dwords(fn);
+    function.assign(fn, fn + n);
+}
+FacadePixelShader::~FacadePixelShader() = default;
+
+HRESULT __stdcall FacadePixelShader::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DPixelShader9) {
+        *ppv = static_cast<IDirect3DPixelShader9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadePixelShader::AddRef()  { return ++ref_count_; }
+ULONG __stdcall FacadePixelShader::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadePixelShader::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+HRESULT __stdcall FacadePixelShader::GetFunction(void* pData, UINT* pSizeOfData) {
+    UINT bytes = static_cast<UINT>(function.size() * sizeof(DWORD));
+    if (!pData) {
+        if (pSizeOfData) *pSizeOfData = bytes;
+        return D3D_OK;
+    }
+    if (!pSizeOfData) return D3DERR_INVALIDCALL;
+    UINT copyBytes = (*pSizeOfData < bytes) ? *pSizeOfData : bytes;
+    if (copyBytes && !function.empty()) std::memcpy(pData, function.data(), copyBytes);
+    *pSizeOfData = bytes;
+    return D3D_OK;
+}
+
+// ---------------------------------------------------------------------------
+// FacadeVertexDeclaration
+// ---------------------------------------------------------------------------
+FacadeVertexDeclaration::FacadeVertexDeclaration(const D3DVERTEXELEMENT9* pElements) {
+    if (!pElements) return;
+    // VE list is terminated by D3DDECL_END() (Stream=0xFF).
+    const D3DVERTEXELEMENT9 end = D3DDECL_END();
+    size_t n = 0;
+    const size_t kCap = 64;
+    while (n < kCap) {
+        const D3DVERTEXELEMENT9& e = pElements[n];
+        elements.push_back(e);
+        if (e.Stream == end.Stream && e.Type == end.Type && e.Method == end.Method) break;
+        ++n;
+    }
+}
+FacadeVertexDeclaration::~FacadeVertexDeclaration() = default;
+
+HRESULT __stdcall FacadeVertexDeclaration::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DVertexDeclaration9) {
+        *ppv = static_cast<IDirect3DVertexDeclaration9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadeVertexDeclaration::AddRef()  { return ++ref_count_; }
+ULONG __stdcall FacadeVertexDeclaration::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadeVertexDeclaration::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+HRESULT __stdcall FacadeVertexDeclaration::GetDeclaration(D3DVERTEXELEMENT9* pElement, UINT* pNumElements) {
+    UINT n = static_cast<UINT>(elements.size());
+    if (!pElement) {
+        if (pNumElements) *pNumElements = n;
+        return D3D_OK;
+    }
+    if (!pNumElements) return D3DERR_INVALIDCALL;
+    UINT copy = (*pNumElements < n) ? *pNumElements : n;
+    if (copy) std::memcpy(pElement, elements.data(), copy * sizeof(D3DVERTEXELEMENT9));
+    *pNumElements = n;
+    return D3D_OK;
+}
+
+// ---------------------------------------------------------------------------
+// FacadeStateBlock
+// ---------------------------------------------------------------------------
+FacadeStateBlock::FacadeStateBlock() = default;
+FacadeStateBlock::~FacadeStateBlock() = default;
+
+HRESULT __stdcall FacadeStateBlock::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DStateBlock9) {
+        *ppv = static_cast<IDirect3DStateBlock9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadeStateBlock::AddRef()  { return ++ref_count_; }
+ULONG __stdcall FacadeStateBlock::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadeStateBlock::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+
+// ---------------------------------------------------------------------------
+// FacadeQuery
+// ---------------------------------------------------------------------------
+FacadeQuery::FacadeQuery(D3DQUERYTYPE type) : type_(type) {}
+FacadeQuery::~FacadeQuery() = default;
+
+HRESULT __stdcall FacadeQuery::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDirect3DQuery9) {
+        *ppv = static_cast<IDirect3DQuery9*>(this);
+        AddRef();
+        return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG __stdcall FacadeQuery::AddRef()  { return ++ref_count_; }
+ULONG __stdcall FacadeQuery::Release() {
+    ULONG r = --ref_count_;
+    if (r == 0) delete this;
+    return r;
+}
+HRESULT __stdcall FacadeQuery::GetDevice(IDirect3DDevice9** ppDevice) {
+    if (ppDevice) *ppDevice = nullptr;
+    return D3DERR_INVALIDCALL;
+}
+
+// ---------------------------------------------------------------------------
 // FacadeSurface
 // ---------------------------------------------------------------------------
 FacadeSurface::FacadeSurface(UINT w, UINT h, D3DFORMAT fmt)

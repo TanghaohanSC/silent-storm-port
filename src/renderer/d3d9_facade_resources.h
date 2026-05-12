@@ -19,6 +19,7 @@
 #include <d3d9.h>
 #include <bgfx/bgfx.h>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace silent_storm::renderer {
@@ -215,6 +216,112 @@ private:
     uint32_t  pitch_bytes_ = 0;
     UINT      locked_face_  = 0;
     UINT      locked_level_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// FacadeVertexShader / FacadePixelShader / FacadeVertexDeclaration — minimal
+// IUnknown-style wrappers. The bgfx side already has its own shaders compiled
+// from `src/shaders/`; these wrappers exist only so Nival's
+// `CreateVertexShader/CreatePixelShader/CreateVertexDeclaration` calls return
+// D3D_OK with a valid pointer. Phase 2 will route SetVertexShader/SetPixelShader
+// through these to bind the matching bgfx::ProgramHandle.
+// ---------------------------------------------------------------------------
+class FacadeVertexShader final : public IDirect3DVertexShader9 {
+public:
+    FacadeVertexShader(const DWORD* function);
+    ~FacadeVertexShader();
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+    HRESULT __stdcall GetDevice(IDirect3DDevice9** ppDevice) override;
+    HRESULT __stdcall GetFunction(void* pData, UINT* pSizeOfData) override;
+
+    std::vector<DWORD> function;
+
+private:
+    ULONG ref_count_ = 1;
+};
+
+class FacadePixelShader final : public IDirect3DPixelShader9 {
+public:
+    FacadePixelShader(const DWORD* function);
+    ~FacadePixelShader();
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+    HRESULT __stdcall GetDevice(IDirect3DDevice9** ppDevice) override;
+    HRESULT __stdcall GetFunction(void* pData, UINT* pSizeOfData) override;
+
+    std::vector<DWORD> function;
+
+private:
+    ULONG ref_count_ = 1;
+};
+
+class FacadeVertexDeclaration final : public IDirect3DVertexDeclaration9 {
+public:
+    FacadeVertexDeclaration(const D3DVERTEXELEMENT9* elements);
+    ~FacadeVertexDeclaration();
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+    HRESULT __stdcall GetDevice(IDirect3DDevice9** ppDevice) override;
+    HRESULT __stdcall GetDeclaration(D3DVERTEXELEMENT9* pElement, UINT* pNumElements) override;
+
+    std::vector<D3DVERTEXELEMENT9> elements;
+
+private:
+    ULONG ref_count_ = 1;
+};
+
+// ---------------------------------------------------------------------------
+// FacadeStateBlock — opaque token; D3D9 callers Apply/Capture it but the
+// facade simply records nothing.
+// ---------------------------------------------------------------------------
+class FacadeStateBlock final : public IDirect3DStateBlock9 {
+public:
+    FacadeStateBlock();
+    ~FacadeStateBlock();
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+    HRESULT __stdcall GetDevice(IDirect3DDevice9** ppDevice) override;
+    HRESULT __stdcall Capture() override { return D3D_OK; }
+    HRESULT __stdcall Apply() override { return D3D_OK; }
+
+private:
+    ULONG ref_count_ = 1;
+};
+
+// ---------------------------------------------------------------------------
+// FacadeQuery — passive query object. CreateQuery is mainly called for
+// D3DQUERYTYPE_VCACHE (informational); returning D3D_OK with a no-op query
+// lets Nival skip its VCACHE polling loop.
+// ---------------------------------------------------------------------------
+class FacadeQuery final : public IDirect3DQuery9 {
+public:
+    explicit FacadeQuery(D3DQUERYTYPE type);
+    ~FacadeQuery();
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+    HRESULT __stdcall GetDevice(IDirect3DDevice9** ppDevice) override;
+    D3DQUERYTYPE __stdcall GetType() override { return type_; }
+    DWORD __stdcall GetDataSize() override { return 0; }
+    HRESULT __stdcall Issue(DWORD /*dwIssueFlags*/) override { return D3D_OK; }
+    HRESULT __stdcall GetData(void* pData, DWORD dwSize, DWORD /*dwGetDataFlags*/) override {
+        if (pData && dwSize) std::memset(pData, 0, dwSize);
+        return S_OK;
+    }
+
+private:
+    ULONG ref_count_ = 1;
+    D3DQUERYTYPE type_;
 };
 
 // ---------------------------------------------------------------------------
