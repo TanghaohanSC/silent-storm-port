@@ -23,6 +23,18 @@ void shutdown();
 // Called from the event pump on SDL_EVENT_WINDOW_RESIZED.
 void on_resize(int width, int height);
 
+// T10/T11: current framebuffer dimensions (updated by init_hwnd + on_resize).
+int get_width();
+int get_height();
+
+// T11: the HUD integer scale that was applied during the last SetTransform(ortho).
+// Returns 1 when no scale is active.  Used by the input bridge to inverse-scale
+// mouse coordinates before passing them to Nival's hit-test.
+int get_hud_scale();
+
+// Internal: called by D3D9Facade::SetTransform to record the active HUD scale.
+void set_hud_scale(int scale);
+
 // Called once per frame from the main loop.
 void begin_frame();
 void end_frame();

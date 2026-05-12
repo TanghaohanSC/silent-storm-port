@@ -1,5 +1,6 @@
 #include "bgfx_init.h"
 #include "shader_registry.h"
+#include "d3d9_facade.h"
 #include "../config/config.h"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
@@ -38,9 +39,18 @@ bgfx::RendererType::Enum map_backend(Backend b) {
         default:              return bgfx::RendererType::Count;  // auto
     }
 }
-int g_width  = 0;
-int g_height = 0;
+int g_width     = 0;
+int g_height    = 0;
+int g_hud_scale = 1;  // T11: updated by D3D9Facade::SetTransform when ortho detected
 } // namespace
+
+int get_width()     { return g_width; }
+int get_height()    { return g_height; }
+int get_hud_scale() { return g_hud_scale; }
+
+// Called by the facade's SetTransform to record the computed HUD scale so the
+// input bridge can read it without depending on D3D9Facade directly.
+void set_hud_scale(int scale) { g_hud_scale = scale; }
 
 bool init(const platform::Window& window, const Config& cfg) {
     auto sz = window.size();
@@ -119,6 +129,9 @@ void end_frame() {
 extern "C" bool ss_renderer_bootstrap(void* hwnd, int width, int height,
                                        const char* cfg_path) {
     silent_storm::Config cfg = silent_storm::LoadConfig(cfg_path ? cfg_path : "silent_storm.cfg");
+    // T10/T11: seed the facade singleton with the loaded config so that
+    // FOV + HUD scale kick in from the very first SetTransform call.
+    silent_storm::renderer::facade_init_with_config(cfg);
     return silent_storm::renderer::init_hwnd(hwnd, width, height, cfg);
 }
 

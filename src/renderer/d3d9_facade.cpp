@@ -12,6 +12,8 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>    // std::floor, std::min, std::max, std::tan
+#include <algorithm>
 
 namespace silent_storm::renderer {
 
@@ -28,10 +30,21 @@ IDirect3DDevice9* facade_instance() {
     return g_instance;
 }
 
+// T10/T11: called from ss_renderer_bootstrap after the config is loaded, so
+// the facade can apply FOV + HUD scale from the very first frame.
+void facade_init_with_config(const Config& cfg) {
+    if (!g_instance)
+        g_instance = new D3D9Facade(cfg);
+    // If an instance already exists (e.g. Nival called CreateDevice first)
+    // we can't safely re-create it — just patch the config in place via a
+    // public setter.  For Phase 1 the normal path is bootstrap-before-device.
+}
+
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 D3D9Facade::D3D9Facade()  = default;
+D3D9Facade::D3D9Facade(const Config& cfg) : cfg_(cfg) {}
 D3D9Facade::~D3D9Facade() = default;
 
 // ---------------------------------------------------------------------------
@@ -415,15 +428,117 @@ HRESULT __stdcall D3D9Facade::Clear(DWORD /*Count*/, CONST D3DRECT* /*pRects*/,
 }
 
 // ---------------------------------------------------------------------------
+// T10/T11 helpers (file-scope so they don't pollute the anonymous namespace
+// that is shared with the draw-call helpers lower in the file).
+// ---------------------------------------------------------------------------
+
+// Returns true if the matrix is an orthographic projection.
+// Ortho: no perspective divide — _44 == 1 and _34 == 0.
+static bool is_ortho(const D3DMATRIX& m) {
+    return m._44 == 1.0f && m._34 == 0.0f;
+}
+
+// Returns true if the matrix looks like a perspective projection.
+// D3D perspective: _44 == 0 and _34 == -1 (LH) or +1 (RH).
+static bool is_perspective(const D3DMATRIX& m) {
+    return m._44 == 0.0f && (m._34 == -1.0f || m._34 == 1.0f);
+}
+
+// Build a D3D-style left-handed perspective matrix with the given FOV/aspect/near/far.
+// Matches D3DXMatrixPerspectiveFovLH exactly so we can drop in as a replacement.
+static D3DMATRIX make_perspective_lh(float fov_y_rad, float aspect, float zn, float zf) {
+    float y_scale = 1.0f / std::tan(fov_y_rad * 0.5f);
+    float x_scale = y_scale / aspect;
+    D3DMATRIX p{};
+    p._11 = x_scale;
+    p._22 = y_scale;
+    p._33 = zf / (zf - zn);
+    p._34 = 1.0f;           // LH: row3 col4
+    p._43 = -(zn * zf) / (zf - zn);
+    p._44 = 0.0f;
+    return p;
+}
+
+// Compute integer HUD scale: cfg value if explicit, else floor(min(w/1024, h/768))
+// clamped to [1, 4].
+static int compute_hud_scale(int w, int h, int cfg_value) {
+    if (cfg_value > 0) return std::min(cfg_value, 4);
+    float auto_scale = std::floor(std::min(w / 1024.0f, h / 768.0f));
+    int s = static_cast<int>(auto_scale);
+    return std::max(1, std::min(s, 4));
+}
+
+// ---------------------------------------------------------------------------
 // Transforms
 // ---------------------------------------------------------------------------
 HRESULT __stdcall D3D9Facade::SetTransform(D3DTRANSFORMSTATETYPE State, CONST D3DMATRIX* pMatrix) {
     if (!pMatrix) return D3DERR_INVALIDCALL;
+
     DWORD s = static_cast<DWORD>(State);
-    if (s == 256 /*D3DTS_WORLD*/) { state_.world      = *pMatrix; }
-    else if (State == D3DTS_VIEW)  { state_.view       = *pMatrix; }
-    else if (State == D3DTS_PROJECTION) { state_.projection = *pMatrix; }
-    // bone matrices (D3DTS_WORLDMATRIX(1..n)) stored later in T9
+
+    if (s == 256 /*D3DTS_WORLD*/) {
+        state_.world = *pMatrix;
+        return D3D_OK;
+    }
+    if (State == D3DTS_VIEW) {
+        state_.view = *pMatrix;
+        return D3D_OK;
+    }
+    if (State == D3DTS_PROJECTION) {
+        // ----- T11: orthographic (HUD/menu) path -----
+        if (is_ortho(*pMatrix)) {
+            int scale = compute_hud_scale(get_width(), get_height(), cfg_.display.hud_scale);
+            if (scale > 1) {
+                D3DMATRIX scaled = *pMatrix;
+                scaled._11 *= static_cast<float>(scale);
+                scaled._22 *= static_cast<float>(scale);
+                state_.projection      = scaled;
+                state_.hud_scale_active = scale;
+            } else {
+                state_.projection      = *pMatrix;
+                state_.hud_scale_active = 1;
+            }
+            set_hud_scale(state_.hud_scale_active);
+            return D3D_OK;
+        }
+
+        // ----- T10: perspective — optionally override FOV -----
+        state_.hud_scale_active = 1;
+        set_hud_scale(1);
+
+        if (cfg_.display.fov_horizontal > 0.0f && is_perspective(*pMatrix)) {
+            // Extract near/far from the incoming D3D LH perspective matrix:
+            //   m._33 = zf/(zf-zn)     m._43 = -zn*zf/(zf-zn)
+            // So: zn = -m._43 / m._33   zf = m._43 / (m._33 - 1)
+            // Guard against degenerate values; fall back to safe defaults.
+            float zn = 0.1f, zf = 10000.0f;
+            if (std::abs(pMatrix->_33) > 1e-6f) {
+                float zn_derived = -pMatrix->_43 / pMatrix->_33;
+                float zf_derived =  pMatrix->_43 / (pMatrix->_33 - 1.0f);
+                if (zn_derived > 0.001f && zf_derived > zn_derived) {
+                    zn = zn_derived;
+                    zf = zf_derived;
+                }
+            }
+
+            // Convert horizontal FOV to vertical FOV for make_perspective_lh.
+            float aspect   = (get_height() > 0)
+                             ? static_cast<float>(get_width()) / static_cast<float>(get_height())
+                             : 16.0f / 9.0f;
+            float fov_h_rad = cfg_.display.fov_horizontal * (3.14159265358979323846f / 180.0f);
+            // fov_v = 2 * atan(tan(fov_h/2) / aspect)
+            float fov_v_rad = 2.0f * std::atan(std::tan(fov_h_rad * 0.5f) / aspect);
+
+            state_.projection = make_perspective_lh(fov_v_rad, aspect, zn, zf);
+            return D3D_OK;
+        }
+
+        // No override — store as-is.
+        state_.projection = *pMatrix;
+        return D3D_OK;
+    }
+
+    // bone matrices (D3DTS_WORLDMATRIX(1..n)) — ignore for now (T9 carryover)
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetTransform(D3DTRANSFORMSTATETYPE State, D3DMATRIX* pMatrix) {

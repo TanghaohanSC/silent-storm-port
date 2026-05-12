@@ -10,6 +10,7 @@ struct DeviceState {
     void* texture[8] = {};              // IDirect3DTexture9*
     D3DMATRIX world{}, view{}, projection{};
     UINT viewport_x = 0, viewport_y = 0, viewport_w = 0, viewport_h = 0;
+    int hud_scale_active = 1;           // T11: >1 when HUD integer-scale is applied
 
     DeviceState() { reset_defaults(); }
     void reset_defaults();

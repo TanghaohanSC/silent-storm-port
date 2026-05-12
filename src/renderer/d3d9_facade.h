@@ -8,12 +8,16 @@
 #include <d3d9.h>
 #include <bgfx/bgfx.h>
 #include "state_translator.h"
+#include "../config/config.h"
 
 namespace silent_storm { namespace renderer {
 
 class D3D9Facade : public IDirect3DDevice9 {
 public:
+    // Default constructor — uses Config defaults (no FOV override, no HUD scale).
     D3D9Facade();
+    // T10/T11: construct with a Config so SetTransform can apply FOV + HUD scale.
+    explicit D3D9Facade(const Config& cfg);
     virtual ~D3D9Facade();
 
     // ----- IUnknown -----
@@ -142,6 +146,7 @@ public:
 private:
     ULONG       ref_count_ = 1;
     DeviceState state_;
+    Config      cfg_;           // T10/T11: stored at construction for FOV/HUD logic
 
     // Saved viewport
     D3DVIEWPORT9 viewport_{};
@@ -191,5 +196,9 @@ private:
 
 // Single global facade instance — the "device" Nival's code receives.
 IDirect3DDevice9* facade_instance();
+
+// T10/T11: create (or note config on) the singleton with a loaded Config so that
+// FOV + HUD scale are applied from the first SetTransform call.
+void facade_init_with_config(const Config& cfg);
 
 }} // namespace silent_storm::renderer

@@ -4,6 +4,14 @@
 #include <SDL3/SDL.h>
 #include <windows.h>  // DWORD, GetTickCount
 
+// T11: forward-declare the hud-scale getter from the renderer module.
+// We avoid including bgfx_init.h directly to prevent a circular library
+// dependency (ss_renderer -> ss_platform -> ss_renderer).  The linker
+// resolves this symbol from ss_renderer at link time.
+namespace silent_storm::renderer {
+    int get_hud_scale();
+}
+
 // ---------------------------------------------------------------------------
 // Forward declarations for Nival's NInput types and the SDL bridge entry point
 // we added to Input.cpp.  We deliberately avoid including Input.h because that
@@ -133,9 +141,19 @@ void forward_to_ninput(const SDL_Event& ev) {
         // ---- Mouse motion --------------------------------------------
         case SDL_EVENT_MOUSE_MOTION: {
             // SDL3 provides relative deltas in xrel/yrel.
-            // NInput mouse axes carry relative delta (same as DI8 buffered data).
-            push_mouse_axis(DIMOFS_X_VAL, static_cast<int>(ev.motion.xrel));
-            push_mouse_axis(DIMOFS_Y_VAL, static_cast<int>(ev.motion.yrel));
+            // T11: when HUD integer-scale > 1, the HUD geometry is enlarged so
+            // we must divide mouse deltas by the same scale factor so that
+            // Nival's hit-test (which works in original 1:1 coords) still lands
+            // on the correct UI elements.
+            int hud_scale = silent_storm::renderer::get_hud_scale();
+            int dx = (hud_scale > 1)
+                     ? static_cast<int>(ev.motion.xrel / static_cast<float>(hud_scale))
+                     : static_cast<int>(ev.motion.xrel);
+            int dy = (hud_scale > 1)
+                     ? static_cast<int>(ev.motion.yrel / static_cast<float>(hud_scale))
+                     : static_cast<int>(ev.motion.yrel);
+            push_mouse_axis(DIMOFS_X_VAL, dx);
+            push_mouse_axis(DIMOFS_Y_VAL, dy);
             break;
         }
 
