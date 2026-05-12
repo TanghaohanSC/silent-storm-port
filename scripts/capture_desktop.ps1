@@ -7,6 +7,7 @@ using System;
 using System.Runtime.InteropServices;
 public class W {
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT r);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT p);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int n);
@@ -29,9 +30,9 @@ if ($hwnd -eq [IntPtr]::Zero) { Write-Output "no HWND"; exit 1 }
 [W]::SetForegroundWindow($hwnd) | Out-Null
 Start-Sleep -Milliseconds 800
 $cr = New-Object W+RECT
-[W]::GetClientRect($hwnd, [ref]$cr) | Out-Null
+[W]::GetWindowRect($hwnd, [ref]$cr) | Out-Null
 $pt = New-Object W+POINT
-[W]::ClientToScreen($hwnd, [ref]$pt) | Out-Null
+$pt.X = $cr.L; $pt.Y = $cr.T
 $cw = $cr.R - $cr.L; $ch = $cr.B - $cr.T
 $bmp = New-Object Drawing.Bitmap $cw, $ch
 $g = [Drawing.Graphics]::FromImage($bmp)
