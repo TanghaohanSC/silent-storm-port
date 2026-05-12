@@ -35,6 +35,7 @@ set(BGFX_CONFIG_RENDERER_OPENGL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/bgfx EXCLUDE_FROM_ALL)
 
 add_subdirectory(src/stubs)
+add_subdirectory(src/config)
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.
 # Start with the leaf vendored libs (zlib, libpng) — no PCH, pure C,
