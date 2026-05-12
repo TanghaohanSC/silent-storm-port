@@ -188,3 +188,25 @@ target_link_libraries(silent_storm PRIVATE
     # System libs (DirectX, etc.) — modern WinSDK ships these.
     dxguid d3d9 dinput8 winmm odbc32 odbccp32
 )
+
+# r43: stage Steam's LifeStudioHeadAPI.dll + its private dependencies next to
+# silent_storm.exe so the import lib (port/src/stubs/lshead/lshead.lib) can
+# resolve at runtime. SILENT_STORM_LSHEAD_DLL is the Steam path set in
+# src/stubs/CMakeLists.txt. LifeStudioHeadAPI.dll DT_NEEDS IMorphFile.dll +
+# TriangLib.dll (TriangLib also needs IMorphFile). All three ship with Steam.
+if(EXISTS "${SILENT_STORM_LSHEAD_DLL}")
+    get_filename_component(_lshead_steam_dir "${SILENT_STORM_LSHEAD_DLL}" DIRECTORY)
+    foreach(_dll LifeStudioHeadAPI.dll IMorphFile.dll TriangLib.dll)
+        if(EXISTS "${_lshead_steam_dir}/${_dll}")
+            add_custom_command(TARGET silent_storm POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_lshead_steam_dir}/${_dll}"
+                    "$<TARGET_FILE_DIR:silent_storm>/${_dll}"
+                COMMENT "r43: staging ${_dll} from Steam install -> bin/"
+                VERBATIM
+            )
+        else()
+            message(WARNING "r43: ${_dll} not found in Steam dir; face animation may fail at runtime")
+        endif()
+    endforeach()
+endif()

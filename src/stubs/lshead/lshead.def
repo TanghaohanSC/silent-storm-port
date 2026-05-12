@@ -1,0 +1,12 @@
+; LifeStudioHeadAPI.dll import definitions
+; Generated from dumpbin /exports of Steam's LifeStudioHeadAPI.dll (32-bit, 2003-04-01)
+; All 6 exports are C++-mangled static `Create` factory methods (__stdcall).
+; Class methods (Load, Process, Destroy, etc.) are accessed via vtable; no exports needed.
+LIBRARY LifeStudioHeadAPI
+EXPORTS
+    ?Create@IAnimator@LifeStudioHeadAPI@@SGPAU12@XZ        @1
+    ?Create@IEyeTracking@LifeStudioHeadAPI@@SGPAU12@XZ     @2
+    ?Create@IMMTree@LifeStudioHeadAPI@@SGPAU12@XZ          @3
+    ?Create@IOptions@LifeStudioHeadAPI@@SGPAU12@PAXII@Z    @4
+    ?Create@ISequencer@LifeStudioHeadAPI@@SGPAU12@XZ       @5
+    ?Create@ITransformer@LifeStudioHeadAPI@@SGPAU12@XZ     @6

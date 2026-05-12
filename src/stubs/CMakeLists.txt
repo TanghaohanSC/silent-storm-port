@@ -76,11 +76,39 @@ target_compile_options(silent_storm_ado_stub PRIVATE /W0 /permissive /Zc:noexcep
     /EHa  # r25: SEH support so __try/__except can guard rec->Import() calls
     /FI${CMAKE_SOURCE_DIR}/third_party/stlport_shim/legacy_compat.h)
 
-# --- LifeStudioHeadAPI permanent header-only stub ---
+# --- LifeStudioHeadAPI: real Steam DLL (r43, 2026-05-12) ---
+# The Steam release of Silent Storm ships LifeStudioHeadAPI.dll alongside the
+# main exe. The DLL exports 6 C++-mangled __stdcall static factories
+# (?Create@IAnimator@..., ?Create@ISequencer@..., ?Create@IMMTree@..., plus
+# IEyeTracking/IOptions/ITransformer which Main doesn't use). All non-static
+# methods dispatch through the object's vtable, so we only need an import lib
+# for the Create symbols. lshead.lib was generated from lshead.def with:
+#   lib /def:lshead.def /out:lshead.lib /machine:x86
+# under vcvars32. lshead.def lists the 6 mangled names verbatim from
+# dumpbin /exports.
+#
+# Until r43 this target was a header-only INTERFACE stub with empty no-op
+# inline methods (face animation dropped). Wiring the real DLL gives us 3D
+# face animation on hero portraits & dialog cameos, unblocking CHeroMenu and
+# any later UI that renders head meshes.
 add_library(silent_storm_lshead_stub INTERFACE)
 target_include_directories(silent_storm_lshead_stub SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/lshead
 )
+target_link_libraries(silent_storm_lshead_stub INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/lshead/lshead.lib
+)
+
+# Stage the real DLL into the runtime bin/ directory next to silent_storm.exe.
+# The DLL itself is not committed (Steam-redistributable binary that lives in
+# the player's existing install), so callers must have a Steam-installed copy.
+# We attach a POST_BUILD step on the silent_storm target (set up in the top-
+# level CMakeLists at the point the exe target exists) — see the
+# `if(TARGET silent_storm)` guard there.
+set(SILENT_STORM_LSHEAD_DLL "C:/Program Files (x86)/Steam/steamapps/common/Silent Storm/LifeStudioHeadAPI.dll" CACHE FILEPATH "Path to Steam-installed LifeStudioHeadAPI.dll for staging into bin/")
+if(NOT EXISTS "${SILENT_STORM_LSHEAD_DLL}")
+    message(WARNING "LifeStudioHeadAPI.dll not found at Steam path; face animation will fail at runtime: ${SILENT_STORM_LSHEAD_DLL}")
+endif()
 
 # Aggregate alias so the main exe can just link one target.
 add_library(silent_storm_stubs INTERFACE)

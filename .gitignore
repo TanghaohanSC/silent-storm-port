@@ -27,6 +27,10 @@ vcpkg_installed/
 *.ilk
 *.exp
 
+# r43: keep checked-in LifeStudioHeadAPI import lib (generated once from
+# lshead.def via `lib /def:lshead.def /out:lshead.lib /machine:x86`)
+!src/stubs/lshead/lshead.lib
+
 # IDE
 .idea/
 .vscode/settings.json
