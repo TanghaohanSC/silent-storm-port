@@ -6,6 +6,7 @@
 #  define NOMINMAX
 #endif
 #include <d3d9.h>
+#include <bgfx/bgfx.h>
 #include "state_translator.h"
 
 namespace silent_storm { namespace renderer {
@@ -175,6 +176,17 @@ private:
     float ps_const_f_[32][4] = {};
     int   ps_const_i_[16][4] = {};
     BOOL  ps_const_b_[16]    = {};
+
+    // Phase 1 Task 9 — current draw stream state
+    IDirect3DVertexBuffer9* stream_vbo_[8]   = {};
+    UINT  stream_offset_[8]                  = {};
+    UINT  stream_stride_[8]                  = {};
+    IDirect3DIndexBuffer9*  ibo_             = nullptr;
+
+    // Current bgfx view ID (0 by default). SetRenderTarget bumps this.
+    uint16_t current_view_id_ = 0;
+
+    bool scene_active_ = false;
 };
 
 // Single global facade instance — the "device" Nival's code receives.

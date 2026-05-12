@@ -1,7 +1,29 @@
 #include "bgfx_init.h"
+#include "shader_registry.h"
+#include "../config/config.h"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <cstdarg>
 #include <cstdio>
+#include <string>
+
+namespace {
+FILE* open_log() {
+    static FILE* f = nullptr;
+    if (!f) { fopen_s(&f, "silent_storm_renderer.log", "w"); }
+    return f;
+}
+void log_line(const char* fmt, ...) {
+    FILE* f = open_log();
+    if (!f) return;
+    va_list ap; va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fflush(f);
+}
+} // namespace
+
 
 namespace silent_storm::renderer {
 
@@ -21,20 +43,25 @@ int g_height = 0;
 } // namespace
 
 bool init(const platform::Window& window, const Config& cfg) {
+    auto sz = window.size();
+    return init_hwnd(window.native_handle(), sz.width, sz.height, cfg);
+}
+
+bool init_hwnd(void* hwnd, int width, int height, const Config& cfg) {
+    log_line("renderer::init_hwnd hwnd=%p w=%d h=%d", hwnd, width, height);
     bgfx::PlatformData pd{};
-    pd.nwh          = window.native_handle();
-    pd.ndt          = nullptr;   // Windows: no display handle (X11 only)
-    pd.backBuffer   = nullptr;   // let bgfx manage
-    pd.backBufferDS = nullptr;   // let bgfx manage
+    pd.nwh          = hwnd;
+    pd.ndt          = nullptr;
+    pd.backBuffer   = nullptr;
+    pd.backBufferDS = nullptr;
     if (!pd.nwh) {
-        std::fprintf(stderr, "bgfx init: no native window handle\n");
+        log_line("bgfx init: no native window handle");
         return false;
     }
     bgfx::setPlatformData(pd);
 
-    auto sz  = window.size();
-    g_width  = sz.width;
-    g_height = sz.height;
+    g_width  = width  > 0 ? width  : 1280;
+    g_height = height > 0 ? height : 720;
 
     bgfx::Init bInit;
     bInit.type                    = map_backend(cfg.renderer.backend);
@@ -43,13 +70,14 @@ bool init(const platform::Window& window, const Config& cfg) {
     bInit.resolution.reset        = cfg.display.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
     bInit.platformData            = pd;
     if (!bgfx::init(bInit)) {
-        std::fprintf(stderr, "bgfx::init failed\n");
+        log_line("bgfx::init failed");
         return false;
     }
+    log_line("bgfx::init ok, backend=%d", (int)bgfx::getRendererType());
 
     bgfx::setViewClear(0,
         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-        0x202020ff,   // dark gray background
+        0x202020ff,
         1.0f,
         0);
     bgfx::setViewRect(0, 0, 0,
@@ -83,3 +111,18 @@ void end_frame() {
 }
 
 } // namespace silent_storm::renderer
+
+// ---------------------------------------------------------------------------
+// C-style entry points for Game/Main.cpp (STLport-compiled).  Keep these
+// `extern "C"` and POD-only so they're safe to call across the ABI boundary.
+// ---------------------------------------------------------------------------
+extern "C" bool ss_renderer_bootstrap(void* hwnd, int width, int height,
+                                       const char* cfg_path) {
+    silent_storm::Config cfg = silent_storm::LoadConfig(cfg_path ? cfg_path : "silent_storm.cfg");
+    return silent_storm::renderer::init_hwnd(hwnd, width, height, cfg);
+}
+
+extern "C" bool ss_renderer_load_shaders(const char* shader_dir) {
+    return silent_storm::renderer::load_all_archetypes(shader_dir);
+}
+

@@ -39,6 +39,8 @@ add_subdirectory(src/config)
 add_subdirectory(src/platform)
 add_subdirectory(src/renderer)
 add_subdirectory(src/shaders)    # Phase 1 T8: bgfx shader archetypes
+# Make sure compiled .bin shaders exist before the renderer-using exe links.
+add_dependencies(ss_renderer ss_shaders)
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.
 # Start with the leaf vendored libs (zlib, libpng) — no PCH, pure C,
@@ -131,6 +133,7 @@ target_compile_definitions(silent_storm PRIVATE
     _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
     _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
     NOMINMAX WIN32_LEAN_AND_MEAN
+    SS_USE_BGFX_FACADE     # phase 1 T9 — enable bgfx bootstrap in Main.cpp
 )
 if(MSVC)
     target_compile_options(silent_storm PRIVATE

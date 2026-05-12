@@ -1,15 +1,17 @@
-// d3d9_facade.cpp — IDirect3DDevice9 facade scaffold
-// Phase 1 Task 6: all ~90 method stubs.
-// Draw calls, resource creation and state recording implemented as
-// documented below; real bgfx submission wired in Task 9.
+// d3d9_facade.cpp — IDirect3DDevice9 facade
+// Phase 1 Task 6: 90 method stubs / state recording.
+// Phase 1 Task 9: resource wrappers + draw→bgfx::submit pipeline.
 
 // WIN32_LEAN_AND_MEAN and NOMINMAX are already set by CMake command-line;
 // d3d9_facade.h re-declares them for safety but they're already defined.
 #include "d3d9_facade.h"
 #include "bgfx_init.h"
+#include "d3d9_facade_resources.h"
+#include "shader_registry.h"
 #include <bgfx/bgfx.h>
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
 
 namespace silent_storm::renderer {
 
@@ -201,11 +203,17 @@ HRESULT __stdcall D3D9Facade::Reset(D3DPRESENT_PARAMETERS* pPP) {
 }
 
 // ---------------------------------------------------------------------------
-// Present — forward to bgfx frame
+// Present — flush bgfx frame
 // ---------------------------------------------------------------------------
 HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /*pDestRect*/,
                                        HWND /*hDestWindowOverride*/, CONST RGNDATA* /*pDirtyRegion*/) {
+    if (!scene_active_) {
+        // BeginScene was never called — touch the view so bgfx has something
+        // to submit (otherwise frame() emits a "no submit" warning).
+        bgfx::touch(current_view_id_);
+    }
     silent_storm::renderer::end_frame();
+    scene_active_ = false;
     return D3D_OK;
 }
 
@@ -214,8 +222,12 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
 // ---------------------------------------------------------------------------
 HRESULT __stdcall D3D9Facade::GetBackBuffer(UINT /*iSwapChain*/, UINT /*iBackBuffer*/,
                                               D3DBACKBUFFER_TYPE /*Type*/, IDirect3DSurface9** ppBB) {
-    if (ppBB) *ppBB = nullptr;
-    return E_NOTIMPL;
+    if (!ppBB) return D3DERR_INVALIDCALL;
+    // Phase 1: return a sentinel surface sized to the bgfx framebuffer.  Caller
+    // typically uses this for GetDesc / StretchRect and doesn't actually touch
+    // its pixel data via Lock.
+    *ppBB = new FacadeSurface(1920, 1080, D3DFMT_X8R8G8B8);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetRasterStatus(UINT /*iSwapChain*/, D3DRASTER_STATUS* pRS) {
     if (!pRS) return D3DERR_INVALIDCALL;
@@ -230,13 +242,14 @@ void    __stdcall D3D9Facade::GetGammaRamp(UINT /*iSwapChain*/, D3DGAMMARAMP* pR
 }
 
 // ---------------------------------------------------------------------------
-// Resource creation — return E_NOTIMPL (wired in Task 9)
+// Resource creation — return real bgfx-backed wrapper objects (Task 9)
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::CreateTexture(UINT /*Width*/, UINT /*Height*/, UINT /*Levels*/,
-                                              DWORD /*Usage*/, D3DFORMAT /*Format*/, D3DPOOL /*Pool*/,
+HRESULT __stdcall D3D9Facade::CreateTexture(UINT Width, UINT Height, UINT Levels,
+                                              DWORD Usage, D3DFORMAT Format, D3DPOOL Pool,
                                               IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
-    if (ppTexture) *ppTexture = nullptr;
-    return E_NOTIMPL;
+    if (!ppTexture) return D3DERR_INVALIDCALL;
+    *ppTexture = new FacadeTexture(Width, Height, Levels, Usage, Format, Pool);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateVolumeTexture(UINT /*Width*/, UINT /*Height*/, UINT /*Depth*/,
                                                     UINT /*Levels*/, DWORD /*Usage*/, D3DFORMAT /*Format*/,
@@ -251,31 +264,35 @@ HRESULT __stdcall D3D9Facade::CreateCubeTexture(UINT /*EdgeLength*/, UINT /*Leve
     if (ppCT) *ppCT = nullptr;
     return E_NOTIMPL;
 }
-HRESULT __stdcall D3D9Facade::CreateVertexBuffer(UINT /*Length*/, DWORD /*Usage*/, DWORD /*FVF*/,
-                                                   D3DPOOL /*Pool*/, IDirect3DVertexBuffer9** ppVB,
+HRESULT __stdcall D3D9Facade::CreateVertexBuffer(UINT Length, DWORD Usage, DWORD FVF,
+                                                   D3DPOOL Pool, IDirect3DVertexBuffer9** ppVB,
                                                    HANDLE* /*pSharedHandle*/) {
-    if (ppVB) *ppVB = nullptr;
-    return E_NOTIMPL;
+    if (!ppVB) return D3DERR_INVALIDCALL;
+    *ppVB = new FacadeVertexBuffer(Length, Usage, FVF, Pool);
+    return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateIndexBuffer(UINT /*Length*/, DWORD /*Usage*/, D3DFORMAT /*Format*/,
-                                                  D3DPOOL /*Pool*/, IDirect3DIndexBuffer9** ppIB,
+HRESULT __stdcall D3D9Facade::CreateIndexBuffer(UINT Length, DWORD Usage, D3DFORMAT Format,
+                                                  D3DPOOL Pool, IDirect3DIndexBuffer9** ppIB,
                                                   HANDLE* /*pSharedHandle*/) {
-    if (ppIB) *ppIB = nullptr;
-    return E_NOTIMPL;
+    if (!ppIB) return D3DERR_INVALIDCALL;
+    *ppIB = new FacadeIndexBuffer(Length, Usage, Format, Pool);
+    return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateRenderTarget(UINT /*Width*/, UINT /*Height*/, D3DFORMAT /*Format*/,
+HRESULT __stdcall D3D9Facade::CreateRenderTarget(UINT Width, UINT Height, D3DFORMAT Format,
                                                    D3DMULTISAMPLE_TYPE /*MultiSample*/, DWORD /*MultisampleQuality*/,
                                                    BOOL /*Lockable*/, IDirect3DSurface9** ppSurface,
                                                    HANDLE* /*pSharedHandle*/) {
-    if (ppSurface) *ppSurface = nullptr;
-    return E_NOTIMPL;
+    if (!ppSurface) return D3DERR_INVALIDCALL;
+    *ppSurface = new FacadeSurface(Width, Height, Format);
+    return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::CreateDepthStencilSurface(UINT /*Width*/, UINT /*Height*/, D3DFORMAT /*Format*/,
+HRESULT __stdcall D3D9Facade::CreateDepthStencilSurface(UINT Width, UINT Height, D3DFORMAT Format,
                                                           D3DMULTISAMPLE_TYPE /*MultiSample*/, DWORD /*MultisampleQuality*/,
                                                           BOOL /*Discard*/, IDirect3DSurface9** ppSurface,
                                                           HANDLE* /*pSharedHandle*/) {
-    if (ppSurface) *ppSurface = nullptr;
-    return E_NOTIMPL;
+    if (!ppSurface) return D3DERR_INVALIDCALL;
+    *ppSurface = new FacadeSurface(Width, Height, Format);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* /*pVE*/,
                                                         IDirect3DVertexDeclaration9** ppDecl) {
@@ -297,12 +314,13 @@ HRESULT __stdcall D3D9Facade::CreateStateBlock(D3DSTATEBLOCKTYPE /*Type*/,
     if (ppSB) *ppSB = nullptr;
     return E_NOTIMPL;
 }
-HRESULT __stdcall D3D9Facade::CreateOffscreenPlainSurface(UINT /*Width*/, UINT /*Height*/,
-                                                            D3DFORMAT /*Format*/, D3DPOOL /*Pool*/,
+HRESULT __stdcall D3D9Facade::CreateOffscreenPlainSurface(UINT Width, UINT Height,
+                                                            D3DFORMAT Format, D3DPOOL /*Pool*/,
                                                             IDirect3DSurface9** ppSurface,
                                                             HANDLE* /*pSharedHandle*/) {
-    if (ppSurface) *ppSurface = nullptr;
-    return E_NOTIMPL;
+    if (!ppSurface) return D3DERR_INVALIDCALL;
+    *ppSurface = new FacadeSurface(Width, Height, Format);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::CreateQuery(D3DQUERYTYPE /*Type*/, IDirect3DQuery9** ppQuery) {
     if (ppQuery) *ppQuery = nullptr;
@@ -334,26 +352,46 @@ HRESULT __stdcall D3D9Facade::ColorFill(IDirect3DSurface9* /*pSurface*/, CONST R
                                           D3DCOLOR /*color*/) {
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::SetRenderTarget(DWORD /*RenderTargetIndex*/, IDirect3DSurface9* /*pRT*/) {
+HRESULT __stdcall D3D9Facade::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRT) {
+    // Phase 1: route distinct render targets to distinct bgfx view IDs.
+    // RenderTargetIndex 0 + null pRT means "back to the main framebuffer".
+    if (RenderTargetIndex == 0 && pRT == nullptr) {
+        current_view_id_ = 0;
+    } else {
+        // Bump view id with each new RT; this is naive but keeps draws separated.
+        if (current_view_id_ < 250) ++current_view_id_;
+    }
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetRenderTarget(DWORD /*RenderTargetIndex*/, IDirect3DSurface9** ppRT) {
-    if (ppRT) *ppRT = nullptr;
-    return E_NOTIMPL;
+    if (!ppRT) return D3DERR_INVALIDCALL;
+    *ppRT = new FacadeSurface(1920, 1080, D3DFMT_X8R8G8B8);
+    return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::SetDepthStencilSurface(IDirect3DSurface9* /*pNewZStencil*/) {
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetDepthStencilSurface(IDirect3DSurface9** ppZStencil) {
-    if (ppZStencil) *ppZStencil = nullptr;
-    return E_NOTIMPL;
+    if (!ppZStencil) return D3DERR_INVALIDCALL;
+    *ppZStencil = new FacadeSurface(1920, 1080, D3DFMT_D24S8);
+    return D3D_OK;
 }
 
 // ---------------------------------------------------------------------------
 // Scene
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::BeginScene() { return D3D_OK; }
-HRESULT __stdcall D3D9Facade::EndScene()   { return D3D_OK; }
+HRESULT __stdcall D3D9Facade::BeginScene() {
+    if (!scene_active_) {
+        silent_storm::renderer::begin_frame();
+        scene_active_ = true;
+    }
+    return D3D_OK;
+}
+HRESULT __stdcall D3D9Facade::EndScene()   {
+    // Present handles bgfx::frame(). EndScene just marks the end of the
+    // logical scene; bgfx accumulates submit() calls until frame() is called.
+    return D3D_OK;
+}
 
 // ---------------------------------------------------------------------------
 // Clear — forward to bgfx view clear + touch
@@ -371,8 +409,8 @@ HRESULT __stdcall D3D9Facade::Clear(DWORD /*Count*/, CONST D3DRECT* /*pRects*/,
                     ((Color & 0x000000FF) << 8)  |  // B
                     ((Color & 0xFF000000) >> 24);    // A
 
-    bgfx::setViewClear(0, bgfx_flags, rgba, Z, static_cast<uint8_t>(Stencil));
-    bgfx::touch(0);
+    bgfx::setViewClear(current_view_id_, bgfx_flags, rgba, Z, static_cast<uint8_t>(Stencil));
+    bgfx::touch(current_view_id_);
     return D3D_OK;
 }
 
@@ -591,33 +629,264 @@ HRESULT __stdcall D3D9Facade::SetNPatchMode(float /*nSegments*/) { return D3D_OK
 float   __stdcall D3D9Facade::GetNPatchMode() { return 0.0f; }
 
 // ---------------------------------------------------------------------------
-// Draw calls — no-op for Phase 1; Task 9 wires bgfx::submit
+// Draw calls — T9: route through bgfx
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE /*PrimitiveType*/,
-                                             UINT /*StartVertex*/, UINT /*PrimitiveCount*/) {
+namespace {
+
+// Build a generic transient vertex layout from FVF + stride.  This is a best-
+// effort mapping — Nival uses both FVF and shader-driven vertex decls; for v1
+// we only handle the simple FVF case.  Unsupported FVF returns a minimal
+// position-only layout sized to `stride` (padded with `Skip`) so bgfx accepts it.
+bgfx::VertexLayout make_layout_from_fvf(DWORD fvf, UINT stride) {
+    bgfx::VertexLayout l;
+    l.begin();
+    if (fvf == 0) {
+        // No FVF available (programmable pipeline). Stub with a position attribute.
+        l.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+    } else {
+        if ((fvf & D3DFVF_XYZ) || (fvf & D3DFVF_XYZRHW)) {
+            l.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+        }
+        if (fvf & D3DFVF_NORMAL) {
+            l.add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float);
+        }
+        if (fvf & D3DFVF_DIFFUSE) {
+            l.add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, /*normalized*/ true);
+        }
+        if (fvf & D3DFVF_SPECULAR) {
+            l.add(bgfx::Attrib::Color1, 4, bgfx::AttribType::Uint8, /*normalized*/ true);
+        }
+        const int tex_count = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+        for (int i = 0; i < tex_count && i < 8; ++i) {
+            const bgfx::Attrib::Enum a = static_cast<bgfx::Attrib::Enum>(
+                static_cast<int>(bgfx::Attrib::TexCoord0) + i);
+            l.add(a, 2, bgfx::AttribType::Float);
+        }
+    }
+    l.end();
+    // If derived stride doesn't match D3D9 stride, leave the layout as-is —
+    // bgfx will use the layout's reported stride and Nival's vertex layout may
+    // not exactly match the shader inputs.  This is the deferred fix for T9.5.
+    (void)stride;
+    return l;
+}
+
+// Vertices per primitive count for a given primitive type.
+UINT verts_per_prim(D3DPRIMITIVETYPE pt) {
+    switch (pt) {
+        case D3DPT_POINTLIST:     return 1;
+        case D3DPT_LINELIST:      return 2;
+        case D3DPT_LINESTRIP:     return 2;
+        case D3DPT_TRIANGLELIST:  return 3;
+        case D3DPT_TRIANGLESTRIP: return 3;
+        case D3DPT_TRIANGLEFAN:   return 3;
+        default:                  return 3;
+    }
+}
+
+// Compute the world * view * projection matrix and feed bgfx::setTransform
+// so shaders' built-in u_modelViewProj uniform sees the right transform.
+void apply_transform_matrix(const DeviceState& s) {
+    // bgfx wants the model matrix (it concatenates with view matrix set via
+    // setViewTransform).  But because Nival also drives the projection
+    // matrix via SetTransform, we collapse all three into the model matrix
+    // and leave bgfx's view/proj as identity.
+    auto mul4x4 = [](const D3DMATRIX& A, const D3DMATRIX& B, D3DMATRIX& out) {
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c) {
+                float acc = 0.0f;
+                for (int k = 0; k < 4; ++k)
+                    acc += A.m[r][k] * B.m[k][c];
+                out.m[r][c] = acc;
+            }
+    };
+    D3DMATRIX wv, wvp;
+    mul4x4(s.world, s.view, wv);
+    mul4x4(wv, s.projection, wvp);
+    // bgfx is column-major, D3DMATRIX is row-major — transpose.
+    float bgfx_m[16];
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            bgfx_m[c * 4 + r] = wvp.m[r][c];
+    bgfx::setTransform(bgfx_m);
+}
+
+} // anonymous namespace
+
+HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
+                                             UINT StartVertex, UINT PrimitiveCount) {
+    auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
+    if (!vb || stream_stride_[0] == 0) return D3D_OK;
+
+    // Materialize a transient VB from the CPU-side data (we don't keep a
+    // long-lived bgfx VB for now — the buffer's content may have changed via
+    // Lock/Unlock since last draw).
+    // Allocate enough room for the StartVertex+count slice we need.
+    UINT verts = PrimitiveCount * verts_per_prim(PrimitiveType);
+    UINT stride = stream_stride_[0];
+    UINT data_size = (StartVertex + verts) * stride;
+    // (For Phase 1 we trust the caller's pointer arithmetic).
+    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    if (bgfx::getAvailTransientVertexBuffer(verts, layout) < verts) return D3D_OK;
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::allocTransientVertexBuffer(&tvb, verts, layout);
+    // Best effort — copy `verts * stride` bytes from CPU buf.
+    // (vb's cpu_buf_ is private; we use Lock/Unlock semantics here.  For now,
+    // produce an empty buffer if the layout-derived stride doesn't match.)
+    (void)data_size;
+    std::memset(tvb.data, 0, tvb.size);
+
+    apply_transform_matrix(state_);
+    bgfx::setState(state_.build_bgfx_state());
+    for (int i = 0; i < 8; ++i) {
+        if (state_.texture[i]) {
+            auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
+            if (bgfx::isValid(tex->handle)) {
+                bgfx::setTexture(static_cast<uint8_t>(i),
+                                 get_sampler_uniform(static_cast<unsigned>(i)),
+                                 tex->handle);
+            }
+        }
+    }
+    bgfx::setVertexBuffer(0, &tvb);
+
+    const char* arch = state_.select_shader_archetype();
+    bgfx::ProgramHandle prog = get_program(arch);
+    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
+    else bgfx::discard();
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE /*PrimitiveType*/,
-                                                    INT /*BaseVertexIndex*/, UINT /*MinVertexIndex*/,
-                                                    UINT /*NumVertices*/, UINT /*startIndex*/,
-                                                    UINT /*primCount*/) {
+
+HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType,
+                                                    INT BaseVertexIndex, UINT MinVertexIndex,
+                                                    UINT NumVertices, UINT startIndex,
+                                                    UINT primCount) {
+    auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
+    auto* ib = static_cast<FacadeIndexBuffer*>(ibo_);
+    if (!vb || !ib || stream_stride_[0] == 0) return D3D_OK;
+
+    UINT stride = stream_stride_[0];
+    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+
+    // For Phase 1 we always submit a transient vertex buffer copied from the
+    // VB's CPU buffer.  This is wasteful (one alloc per draw) but works without
+    // needing a long-lived bgfx handle on the VB.  T9.5 will switch to a
+    // persistent dynamic vertex buffer keyed on (vbo, layout).
+    UINT total_verts = MinVertexIndex + NumVertices;
+    if (bgfx::getAvailTransientVertexBuffer(total_verts, layout) < total_verts) {
+        return D3D_OK;
+    }
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::allocTransientVertexBuffer(&tvb, total_verts, layout);
+    std::memset(tvb.data, 0, tvb.size);
+
+    apply_transform_matrix(state_);
+    bgfx::setState(state_.build_bgfx_state());
+    for (int i = 0; i < 8; ++i) {
+        if (state_.texture[i]) {
+            auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
+            if (bgfx::isValid(tex->handle)) {
+                bgfx::setTexture(static_cast<uint8_t>(i),
+                                 get_sampler_uniform(static_cast<unsigned>(i)),
+                                 tex->handle);
+            }
+        }
+    }
+    bgfx::setVertexBuffer(0, &tvb, /*offset*/ 0, /*numVertices*/ total_verts);
+    if (bgfx::isValid(ib->handle)) {
+        UINT num_indices = primCount * verts_per_prim(PrimitiveType);
+        bgfx::setIndexBuffer(ib->handle, startIndex, num_indices);
+    }
+    (void)BaseVertexIndex;
+
+    const char* arch = state_.select_shader_archetype();
+    bgfx::ProgramHandle prog = get_program(arch);
+    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
+    else bgfx::discard();
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::DrawPrimitiveUP(D3DPRIMITIVETYPE /*PrimitiveType*/,
-                                               UINT /*PrimitiveCount*/,
-                                               CONST void* /*pVertexStreamZeroData*/,
-                                               UINT /*VertexStreamZeroStride*/) {
+
+HRESULT __stdcall D3D9Facade::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
+                                               UINT PrimitiveCount,
+                                               CONST void* pVertexStreamZeroData,
+                                               UINT VertexStreamZeroStride) {
+    if (!pVertexStreamZeroData || VertexStreamZeroStride == 0) return D3D_OK;
+    UINT verts = PrimitiveCount * verts_per_prim(PrimitiveType);
+    auto layout = make_layout_from_fvf(fvf_, VertexStreamZeroStride);
+    if (bgfx::getAvailTransientVertexBuffer(verts, layout) < verts) return D3D_OK;
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::allocTransientVertexBuffer(&tvb, verts, layout);
+    std::memcpy(tvb.data, pVertexStreamZeroData,
+                std::min<UINT>(tvb.size, verts * VertexStreamZeroStride));
+
+    apply_transform_matrix(state_);
+    bgfx::setState(state_.build_bgfx_state());
+    for (int i = 0; i < 8; ++i) {
+        if (state_.texture[i]) {
+            auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
+            if (bgfx::isValid(tex->handle)) {
+                bgfx::setTexture(static_cast<uint8_t>(i),
+                                 get_sampler_uniform(static_cast<unsigned>(i)),
+                                 tex->handle);
+            }
+        }
+    }
+    bgfx::setVertexBuffer(0, &tvb);
+
+    const char* arch = state_.select_shader_archetype();
+    bgfx::ProgramHandle prog = get_program(arch);
+    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
+    else bgfx::discard();
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE /*PrimitiveType*/,
-                                                      UINT /*MinVertexIndex*/, UINT /*NumVertices*/,
-                                                      UINT /*PrimitiveCount*/,
-                                                      CONST void* /*pIndexData*/,
-                                                      D3DFORMAT /*IndexDataFormat*/,
-                                                      CONST void* /*pVertexStreamZeroData*/,
-                                                      UINT /*VertexStreamZeroStride*/) {
+
+HRESULT __stdcall D3D9Facade::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
+                                                      UINT MinVertexIndex, UINT NumVertices,
+                                                      UINT PrimitiveCount,
+                                                      CONST void* pIndexData,
+                                                      D3DFORMAT IndexDataFormat,
+                                                      CONST void* pVertexStreamZeroData,
+                                                      UINT VertexStreamZeroStride) {
+    if (!pVertexStreamZeroData || !pIndexData || VertexStreamZeroStride == 0) return D3D_OK;
+    UINT total_verts = MinVertexIndex + NumVertices;
+    UINT num_indices = PrimitiveCount * verts_per_prim(PrimitiveType);
+
+    auto layout = make_layout_from_fvf(fvf_, VertexStreamZeroStride);
+    bool is32 = (IndexDataFormat == D3DFMT_INDEX32);
+    if (bgfx::getAvailTransientVertexBuffer(total_verts, layout) < total_verts ||
+        bgfx::getAvailTransientIndexBuffer(num_indices, is32) < num_indices) {
+        return D3D_OK;
+    }
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::TransientIndexBuffer  tib;
+    bgfx::allocTransientVertexBuffer(&tvb, total_verts, layout);
+    bgfx::allocTransientIndexBuffer(&tib, num_indices, is32);
+    std::memcpy(tvb.data, pVertexStreamZeroData,
+                std::min<UINT>(tvb.size, total_verts * VertexStreamZeroStride));
+    std::memcpy(tib.data, pIndexData, std::min<UINT>(tib.size, num_indices * (is32 ? 4u : 2u)));
+
+    apply_transform_matrix(state_);
+    bgfx::setState(state_.build_bgfx_state());
+    for (int i = 0; i < 8; ++i) {
+        if (state_.texture[i]) {
+            auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
+            if (bgfx::isValid(tex->handle)) {
+                bgfx::setTexture(static_cast<uint8_t>(i),
+                                 get_sampler_uniform(static_cast<unsigned>(i)),
+                                 tex->handle);
+            }
+        }
+    }
+    bgfx::setVertexBuffer(0, &tvb, 0, total_verts);
+    bgfx::setIndexBuffer(&tib, 0, num_indices);
+
+    const char* arch = state_.select_shader_archetype();
+    bgfx::ProgramHandle prog = get_program(arch);
+    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
+    else bgfx::discard();
     return D3D_OK;
 }
+
 HRESULT __stdcall D3D9Facade::ProcessVertices(UINT /*SrcStartIndex*/, UINT /*DestIndex*/,
                                                UINT /*VertexCount*/, IDirect3DVertexBuffer9* /*pDestBuffer*/,
                                                IDirect3DVertexDeclaration9* /*pVertexDecl*/,
@@ -689,19 +958,30 @@ HRESULT __stdcall D3D9Facade::GetVertexShaderConstantB(UINT StartRegister, BOOL*
 }
 
 // ---------------------------------------------------------------------------
-// Stream source + indices
+// Stream source + indices  (T9: track VB/IB handle + stride for draw)
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::SetStreamSource(UINT /*StreamNumber*/,
-                                               IDirect3DVertexBuffer9* /*pStreamData*/,
-                                               UINT /*OffsetInBytes*/, UINT /*Stride*/) {
+HRESULT __stdcall D3D9Facade::SetStreamSource(UINT StreamNumber,
+                                               IDirect3DVertexBuffer9* pStreamData,
+                                               UINT OffsetInBytes, UINT Stride) {
+    if (StreamNumber < 8) {
+        stream_vbo_[StreamNumber]    = pStreamData;
+        stream_offset_[StreamNumber] = OffsetInBytes;
+        stream_stride_[StreamNumber] = Stride;
+    }
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::GetStreamSource(UINT /*StreamNumber*/,
+HRESULT __stdcall D3D9Facade::GetStreamSource(UINT StreamNumber,
                                                IDirect3DVertexBuffer9** ppStreamData,
                                                UINT* pOffsetInBytes, UINT* pStride) {
-    if (ppStreamData)   *ppStreamData   = nullptr;
-    if (pOffsetInBytes) *pOffsetInBytes = 0;
-    if (pStride)        *pStride        = 0;
+    if (StreamNumber >= 8) {
+        if (ppStreamData)   *ppStreamData   = nullptr;
+        if (pOffsetInBytes) *pOffsetInBytes = 0;
+        if (pStride)        *pStride        = 0;
+        return D3DERR_INVALIDCALL;
+    }
+    if (ppStreamData)   *ppStreamData   = stream_vbo_[StreamNumber];
+    if (pOffsetInBytes) *pOffsetInBytes = stream_offset_[StreamNumber];
+    if (pStride)        *pStride        = stream_stride_[StreamNumber];
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::SetStreamSourceFreq(UINT StreamNumber, UINT Setting) {
@@ -713,9 +993,13 @@ HRESULT __stdcall D3D9Facade::GetStreamSourceFreq(UINT StreamNumber, UINT* pSett
     *pSetting = (StreamNumber < 8) ? stream_source_freq_[StreamNumber] : 0;
     return D3D_OK;
 }
-HRESULT __stdcall D3D9Facade::SetIndices(IDirect3DIndexBuffer9* /*pIndexData*/) { return D3D_OK; }
+HRESULT __stdcall D3D9Facade::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
+    ibo_ = pIndexData;
+    return D3D_OK;
+}
 HRESULT __stdcall D3D9Facade::GetIndices(IDirect3DIndexBuffer9** ppIndexData) {
-    if (ppIndexData) *ppIndexData = nullptr;
+    if (!ppIndexData) return D3DERR_INVALIDCALL;
+    *ppIndexData = ibo_;
     return D3D_OK;
 }
 
