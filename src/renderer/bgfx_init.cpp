@@ -161,6 +161,10 @@ void end_frame() {
     // atlas binding lands.
     static uint64_t s_frame = 0;
     ++s_frame;
+    if (s_frame < 5 || (s_frame % 600) == 0) {
+        FILE* f = nullptr; fopen_s(&f, "silent_storm_present.log", "a");
+        if (f) { fprintf(f, "end_frame s_frame=%llu\n", (unsigned long long)s_frame); fclose(f); }
+    }
     bgfx::dbgTextClear();
     bgfx::dbgTextPrintf(2, 0, 0x0f,
         "Silent Storm port  -  Phase 1.5 r4  -  bgfx alive, frame %llu",
@@ -427,6 +431,12 @@ extern "C" void ss_present_frame() {
     // call that advances bgfx and gets the dbg-text + ss_ui submissions to
     // the screen.  Cheap; idempotent w.r.t. multiple BeginScene/Present
     // pairs because end_frame() is the actual bgfx::frame() boundary.
+    static int s_call = 0;
+    ++s_call;
+    if (s_call < 5 || (s_call % 60) == 0) {
+        FILE* f = nullptr; fopen_s(&f, "silent_storm_present.log", "a");
+        if (f) { fprintf(f, "ss_present_frame call=%d\n", s_call); fclose(f); }
+    }
     silent_storm::renderer::end_frame();
 }
 
