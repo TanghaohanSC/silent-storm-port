@@ -18,6 +18,22 @@ include(CompilerWarnings)
 include(LegacyDeps)        # legacy::stlport
 include(VendoredJan03)     # add_jan03_subproject()
 
+# --- Phase 1 modern deps ---
+find_package(SDL3 CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
+
+# bgfx via git submodule. Disable D3D9 backend to avoid d3d9.h symbol
+# collision with our IDirect3DDevice9 facade (Phase 1 Task 6+).
+set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
+set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
+set(BGFX_CONFIG_RENDERER_VULKAN ON CACHE BOOL "" FORCE)
+set(BGFX_CONFIG_RENDERER_DIRECT3D11 ON CACHE BOOL "" FORCE)
+set(BGFX_CONFIG_RENDERER_DIRECT3D12 OFF CACHE BOOL "" FORCE)
+set(BGFX_CONFIG_RENDERER_DIRECT3D9 OFF CACHE BOOL "" FORCE)
+set(BGFX_CONFIG_RENDERER_OPENGL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/bgfx EXCLUDE_FROM_ALL)
+
 add_subdirectory(src/stubs)
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.

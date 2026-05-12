@@ -1,5 +1,9 @@
 {
     "name": "silent-storm-port",
     "version": "0.1.0",
-    "dependencies": []
+    "builtin-baseline": "d4db34445deb11168b595da1efd228df79a5f59d",
+    "dependencies": [
+        "sdl3",
+        "fmt"
+    ]
 }

@@ -1,0 +1,14 @@
+bgfx.cmake submodule pin
+========================
+commit: cf47cdd6b2dd1b45d19450b2b4c3a2267b6a9e87
+tag:    v1.143.9248-540
+date:   2026-05-12
+
+Pinned for Phase 1 reproducibility. Bump via:
+  cd third_party/bgfx
+  git fetch
+  git checkout <new-sha>
+  cd ../..
+  # update this file with the new sha + tag
+  git add third_party/bgfx third_party/bgfx-version.txt
+  git commit -m "build: bump bgfx to <tag>"
