@@ -57,18 +57,28 @@ silent_storm.exe (Game/Main.cpp's WinMain, statically linked)
 
 ## Phase 1 acceptance: PARTIAL
 
-The code-level deliverables of Phase 1 are all in place. **Visual verification at main menu has NOT been achieved this phase** due to a runtime issue:
+The code-level deliverables of Phase 1 are all in place. **Visual verification at main menu has NOT been achieved this phase** — runtime hits an access violation before reaching renderer init.
 
-silent_storm.exe currently crashes with an assertion failure inside `NDatabase::Serialize` at `BasicChunk1.cpp:406` — a class typeID present in game.db has no registered `CObjectBase` factory in our build. The skip-and-log fix added (`fix(jan03): skip unregistered class typeIDs`) keeps Nival's deserialization alive past that point, but downstream code then hits another `__debugbreak` before reaching the renderer init hook.
+### Phase 1.5 progress (committed `ecdefc4`)
 
-The most likely root cause: Main DLL is built as a CMake `OBJECT` library and statically linked into silent_storm.exe. MSVC's linker may dead-strip the static initializers from `REGISTER_SAVELOAD_CLASS(typeId, ClassName)` macros that aren't directly referenced anywhere — losing the class registration at runtime even though the code is in the binary.
+Linker dead-strip hypothesis **CONFIRMED**:
+- Changed `add_jan03_subproject(Main TYPE OBJECT)` → `TYPE STATIC`
+- Added `target_link_options(silent_storm PRIVATE /WHOLEARCHIVE:Main /WHOLEARCHIVE:DBFormat)`
+- exe size grew 23 → 24.3 MB (every .obj now retained)
+- Result: **no more `STATUS_BREAKPOINT` at BasicChunk1.cpp:406** — class registrations now survive linking.
 
-**This is recognized as a Phase 1.5 polish item** (Task #23 in the project task list). Likely fixes:
-- Pass `/WHOLEARCHIVE:jan03_Main` to the linker via `target_link_options` to force-keep all object files.
-- OR convert Main from OBJECT lib to STATIC lib + ensure `MSVC: target_link_options(... /WHOLEARCHIVE:Main)`.
-- OR add explicit `__pragma(comment(linker, "/include:..."))` references to each REGISTER_SAVELOAD_CLASS symbol.
+### Remaining runtime blocker
 
-Until that is fixed, runtime verification of T9-T11 work is impossible. The plumbing is in place; the moment classes register correctly, `Init3D` calls the facade, the facade calls bgfx, and pixels reach the SDL3 window.
+exe now crashes with `STATUS_ACCESS_VIOLATION (0xC0000005)` instead of the prior breakpoint. The renderer init log (`silent_storm_renderer.log`) is NOT written, meaning the bootstrap inserted in `Game/Main.cpp` between `InitApplication` and `Init3D` is never reached. Some null pointer is dereferenced inside Nival's `InitApplication` path — most likely a `CObjectBase*` returned by `NDatabase::Serialize` that's still null even with all classes registered (perhaps a different deserialization edge case, OR our skip-and-log fallback in BasicChunk1.cpp is still active and now feeds null pointers into Nival's resource tables).
+
+### Phase 1.5 next moves
+
+1. Remove the BasicChunk1.cpp skip-and-log fallback — with /WHOLEARCHIVE active, the assert should now fire only on genuinely missing classes (which we can then add stubs for, vs silently nulling them).
+2. Instrument `Game/Main.cpp` with `MessageBox` checkpoints between InitApplication and the renderer bootstrap to localize the access violation.
+3. OR attach a debugger (Visual Studio "Attach to Process") at the crash point — fastest path to root cause.
+4. Once renderer init is reached: expect bgfx clear color visible in SDL3 window, plus iterative facade method gaps to fill in.
+
+Until that is fixed, runtime verification of T9-T11 work is impossible. The plumbing is in place; the moment InitApplication completes cleanly, `Init3D` calls the facade, the facade calls bgfx, and pixels reach the SDL3 window.
 
 ## Acceptance checklist
 
