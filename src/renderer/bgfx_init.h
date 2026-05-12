@@ -66,4 +66,14 @@ void ss_dbg_text_banner(const char* text);
 // before font/texture geometry is wired up — flushed via ss_ui shader on
 // view 0 alongside the dbg_tri.
 void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2, unsigned abgr);
+
+// Phase 1.5 r4 — REAL bitmap glyph relay.  Pushes one ASCII string to be
+// rendered as a row of textured quads sampled from an 8x16 Consolas atlas
+// uploaded into a 128x128 BGRA8 bgfx texture.  Each character produces one
+// quad (6 vertices) emitted on view 0 via ss_ui with alpha blend.  abgr is
+// the per-vertex color modulating the glyph coverage.  scale_x/y are
+// integer multipliers (1, 2, ...) applied to the 8x16 cell size — pass 1
+// for native size.  Coords are 1024x768 virtual; clipped silently to the
+// available glyph-quad pool.  Cleared automatically at end_frame().
+void ss_dbg_glyph_push(int virtX, int virtY, unsigned abgr, int scale_x, int scale_y, const char* text);
 } // extern "C"

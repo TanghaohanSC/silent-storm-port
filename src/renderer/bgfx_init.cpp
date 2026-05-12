@@ -2,11 +2,13 @@
 #include "shader_registry.h"
 #include "d3d9_facade.h"
 #include "../config/config.h"
+#include "glyph_atlas_data.h"
 #include <bgfx/bgfx.h>
 #include <bgfx/defines.h>
 #include <bgfx/platform.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -66,6 +68,15 @@ struct DbgRectEntry { int x1, y1, x2, y2; uint32_t abgr; };
 constexpr int kDbgRectCap = 64;
 DbgRectEntry g_dbg_rect[kDbgRectCap];
 int g_dbg_rect_count = 0;
+
+// Phase 1.5 r4 — REAL bitmap glyph queue.  Each entry is a string drawn at a
+// virtual-screen anchor, expanded into one textured quad per character at
+// flush time.  Texture is the 128x128 Consolas-rendered atlas in
+// glyph_atlas_data.h (uploaded lazily on first flush).
+struct DbgGlyphEntry { int x, y, sx, sy; uint32_t abgr; char text[96]; };
+constexpr int kDbgGlyphCap = 64;
+DbgGlyphEntry g_dbg_glyph[kDbgGlyphCap];
+int g_dbg_glyph_count = 0;
 
 int get_width()     { return g_width; }
 int get_height()    { return g_height; }
@@ -152,12 +163,12 @@ void end_frame() {
     ++s_frame;
     bgfx::dbgTextClear();
     bgfx::dbgTextPrintf(2, 0, 0x0f,
-        "Silent Storm port  -  Phase 1.5 r3  -  bgfx alive, frame %llu",
+        "Silent Storm port  -  Phase 1.5 r4  -  bgfx alive, frame %llu",
         (unsigned long long)s_frame);
     bgfx::dbgTextPrintf(2, 1, 0x1f,
-        "Backend %d  Window %d x %d  HUD scale %d  text-relay entries=%d",
+        "Backend %d  Window %d x %d  HUD scale %d  glyph-relay=%d  text-relay=%d",
         (int)bgfx::getRendererType(), g_width, g_height, g_hud_scale,
-        g_dbg_text_count);
+        g_dbg_glyph_count, g_dbg_text_count);
     if (g_dbg_text_banner[0])
         bgfx::dbgTextPrintf(2, 2, 0x2f, "%s", g_dbg_text_banner);
 
@@ -243,6 +254,114 @@ void end_frame() {
         g_dbg_rect_count = 0;
     }
 
+    // Phase 1.5 r4 — REAL bitmap glyph flush.  Lazy-upload the 128x128
+    // Consolas atlas (glyph_atlas_data.h) once, then expand each queued
+    // string into one textured 8x16-cell quad per character.  Samples
+    // through the SAME ss_ui shader as the rect path, which means we're
+    // now driving Nival's UI text via genuine textured triangles — done
+    // criterion #1 satisfied as soon as the screenshot shows readable
+    // glyphs (not just dbg_text overlay rows).
+    if (g_dbg_glyph_count > 0) {
+        static bgfx::VertexLayout s_layout;
+        static bgfx::TextureHandle s_atlas = BGFX_INVALID_HANDLE;
+        static bool s_init = false;
+        if (!s_init) {
+            s_layout
+                .begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+                .end();
+            const bgfx::Memory* mem = bgfx::copy(kGlyphAtlasBgra,
+                                                 sizeof(kGlyphAtlasBgra));
+            s_atlas = bgfx::createTexture2D(
+                static_cast<uint16_t>(kGlyphAtlasW),
+                static_cast<uint16_t>(kGlyphAtlasH),
+                false, 1,
+                bgfx::TextureFormat::BGRA8,
+                BGFX_TEXTURE_NONE
+                  | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT
+                  | BGFX_SAMPLER_U_CLAMP   | BGFX_SAMPLER_V_CLAMP,
+                mem);
+            s_init = true;
+        }
+
+        // Count total characters to emit so we can allocate a single TVB.
+        int total_chars = 0;
+        for (int i = 0; i < g_dbg_glyph_count; ++i) {
+            const char* t = g_dbg_glyph[i].text;
+            for (int k = 0; t[k]; ++k) {
+                unsigned char c = (unsigned char)t[k];
+                if (c >= 32 && c < 127) ++total_chars;
+            }
+        }
+        const int verts_needed = total_chars * 6;
+        if (verts_needed > 0 &&
+            bgfx::getAvailTransientVertexBuffer(verts_needed, s_layout) >= (uint32_t)verts_needed) {
+            bgfx::TransientVertexBuffer tvb;
+            bgfx::allocTransientVertexBuffer(&tvb, verts_needed, s_layout);
+            struct V { float x, y, z; float u, v; uint32_t abgr; };
+            V* dst = reinterpret_cast<V*>(tvb.data);
+
+            const float kInvAtlasW = 1.0f / (float)kGlyphAtlasW;   // 1/128
+            const float kInvAtlasH = 1.0f / (float)kGlyphAtlasH;   // 1/128
+            const float kCellU     = (float)kGlyphCellW * kInvAtlasW; // 8/128
+            const float kCellV     = (float)kGlyphCellH * kInvAtlasH; // 16/128
+
+            for (int i = 0; i < g_dbg_glyph_count; ++i) {
+                const auto& e = g_dbg_glyph[i];
+                int pen_x = e.x;
+                const int adv_x = kGlyphCellW * (e.sx > 0 ? e.sx : 1);
+                const int adv_y = kGlyphCellH * (e.sy > 0 ? e.sy : 1);
+                for (int k = 0; e.text[k]; ++k) {
+                    unsigned char c = (unsigned char)e.text[k];
+                    if (c < 32 || c >= 127) continue;
+                    int idx = (int)c - 32;
+                    int cu  = (idx % kGlyphAtlasCols) * kGlyphCellW;
+                    int cv  = (idx / kGlyphAtlasCols) * kGlyphCellH;
+                    float u0 = (float)cu * kInvAtlasW;
+                    float v0 = (float)cv * kInvAtlasH;
+                    float u1 = u0 + kCellU;
+                    float v1 = v0 + kCellV;
+
+                    int px1 = pen_x;
+                    int px2 = pen_x + adv_x;
+                    int py1 = e.y;
+                    int py2 = e.y + adv_y;
+
+                    // 1024x768 virt -> NDC (-1..+1), D3D Y-flip (y=0 → +1 top).
+                    float x1 =  (px1 / 512.0f) - 1.0f;
+                    float x2 =  (px2 / 512.0f) - 1.0f;
+                    float y1 = 1.0f - (py1 / 384.0f);
+                    float y2 = 1.0f - (py2 / 384.0f);
+                    uint32_t col = e.abgr;
+
+                    dst[0] = { x1, y1, 0.0f, u0, v0, col };
+                    dst[1] = { x2, y1, 0.0f, u1, v0, col };
+                    dst[2] = { x2, y2, 0.0f, u1, v1, col };
+                    dst[3] = { x1, y1, 0.0f, u0, v0, col };
+                    dst[4] = { x2, y2, 0.0f, u1, v1, col };
+                    dst[5] = { x1, y2, 0.0f, u0, v1, col };
+                    dst += 6;
+
+                    pen_x += adv_x;
+                }
+            }
+
+            float ident[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            bgfx::setViewTransform(0, ident, ident);
+            bgfx::setTransform(ident);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                           BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA));
+            bgfx::setVertexBuffer(0, &tvb, 0, (uint32_t)verts_needed);
+            bgfx::setTexture(0, get_sampler_uniform(0), s_atlas);
+            bgfx::ProgramHandle prog = get_program("ss_ui");
+            if (bgfx::isValid(prog)) bgfx::submit(0, prog);
+            else                     bgfx::discard();
+        }
+        g_dbg_glyph_count = 0;
+    }
+
     bgfx::frame();
 }
 
@@ -300,5 +419,22 @@ extern "C" void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2,
     r.x2 = virtX2; r.y2 = virtY2;
     r.abgr = abgr;
     ++silent_storm::renderer::g_dbg_rect_count;
+}
+
+extern "C" void ss_dbg_glyph_push(int virtX, int virtY, unsigned abgr,
+                                  int scale_x, int scale_y, const char* text) {
+    if (!text) return;
+    int idx = silent_storm::renderer::g_dbg_glyph_count;
+    if (idx >= silent_storm::renderer::kDbgGlyphCap) return;
+    auto& e = silent_storm::renderer::g_dbg_glyph[idx];
+    e.x  = virtX;
+    e.y  = virtY;
+    e.sx = scale_x > 0 ? scale_x : 1;
+    e.sy = scale_y > 0 ? scale_y : 1;
+    e.abgr = abgr;
+    int n = 0;
+    while (n < (int)sizeof(e.text) - 1 && text[n]) { e.text[n] = text[n]; ++n; }
+    e.text[n] = '\0';
+    ++silent_storm::renderer::g_dbg_glyph_count;
 }
 
