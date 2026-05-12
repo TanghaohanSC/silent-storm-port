@@ -367,14 +367,13 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
         }
     }
 
-    // r71: push a fake-terrain rect to the existing dbg-rect queue. end_frame
-    // already flushes that queue via ss_ui — proven path that lands pixels.
-    // Sky band (upper third) light blue
-    ss_dbg_rect_push(0, 90, 1024, 280, 0xff80a0ffu);
-    // Distant terrain (middle band) medium green
-    ss_dbg_rect_push(0, 280, 1024, 420, 0xff408050u);
-    // Near terrain (lower half) darker olive green
-    ss_dbg_rect_push(0, 420, 1024, 768, 0xff205030u);
+    // r72: push fake-terrain rects. Color encoding test:
+    // 0xff0000ff: bytes [FF][00][00][FF] = R=255 G=0 B=0 A=255 -> red
+    // 0xff00ff00: bytes [00][FF][00][FF] = R=0 G=255 B=0 A=255 -> green
+    // 0xffff0000: bytes [00][00][FF][FF] = R=0 G=0 B=255 A=255 -> blue
+    ss_dbg_rect_push(0,   0, 1024, 256, 0xff0000ffu);  // red    band
+    ss_dbg_rect_push(0, 256, 1024, 512, 0xff00ff00u);  // green  band
+    ss_dbg_rect_push(0, 512, 1024, 768, 0xffff0000u);  // blue   band
 
     // Phase 1.5 r2 iter 5: submit a debug "I am alive" colored triangle once
     // per frame so we can validate the actual shader/vertex pipeline end-to-end.

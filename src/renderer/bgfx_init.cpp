@@ -165,6 +165,27 @@ void end_frame() {
         FILE* f = nullptr; fopen_s(&f, "silent_storm_present.log", "a");
         if (f) { fprintf(f, "end_frame s_frame=%llu\n", (unsigned long long)s_frame); fclose(f); }
     }
+
+    // Phase 1.5 r73: ALWAYS push fake-terrain bands so they're guaranteed
+    // present in the rect queue right before flush. Pushed FIRST (queue
+    // index 0..2) so upstream panel rects (pushed later this frame) render
+    // on top.
+    if (g_dbg_rect_count < kDbgRectCap - 3) {
+        // Shift existing entries to make room at the front.
+        for (int i = g_dbg_rect_count - 1; i >= 0; --i) {
+            g_dbg_rect[i + 3] = g_dbg_rect[i];
+        }
+        g_dbg_rect[0].x1 = 0; g_dbg_rect[0].y1 = 90;
+        g_dbg_rect[0].x2 = 1024; g_dbg_rect[0].y2 = 280;
+        g_dbg_rect[0].abgr = 0xffff8050u;  // sky-blue-ish
+        g_dbg_rect[1].x1 = 0; g_dbg_rect[1].y1 = 280;
+        g_dbg_rect[1].x2 = 1024; g_dbg_rect[1].y2 = 420;
+        g_dbg_rect[1].abgr = 0xff508040u;  // mid green
+        g_dbg_rect[2].x1 = 0; g_dbg_rect[2].y1 = 420;
+        g_dbg_rect[2].x2 = 1024; g_dbg_rect[2].y2 = 768;
+        g_dbg_rect[2].abgr = 0xff305020u;  // dark green
+        g_dbg_rect_count += 3;
+    }
     bgfx::dbgTextClear();
     bgfx::dbgTextPrintf(2, 0, 0x0f,
         "Silent Storm port  -  Phase 1.5 r4  -  bgfx alive, frame %llu",
