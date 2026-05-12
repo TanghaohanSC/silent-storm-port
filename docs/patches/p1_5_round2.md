@@ -49,3 +49,106 @@ distinct framebuffers for offscreen targets are Phase 2 work.
 (Nival's `ClearScreen(0.5,0.5,0.5)`) covering the entire 1024x768 client
 area. See `p1_5_r2_iter1_clear_color_fills_window.png`.
 
+## Iteration 2 — Blocker B: draw-call trace facility
+
+Added a per-frame draw-call / submit logger in `port/src/renderer/
+d3d9_facade.cpp`:
+
+- `trace_draw_entry()` — logs each of the first 16 `DrawPrimitive*` entries
+  (then every 256th) into `silent_storm_draw.log`.
+- `trace_submit()` — logs the first time each shader archetype reaches
+  `bgfx::submit`, with the program handle's `.idx` + `bgfx::isValid()`.
+- `trace_invalid_prog()` — logs the first 8 archetypes that drop into
+  `bgfx::discard()` because the program lookup failed.
+- `BeginScene` + `Present` log a coarse frame counter so we can correlate
+  Nival's scene cycles with bgfx frames.
+
+**Finding**: with the round-1 patches still active, the main loop ticks
+through `BeginScene` + `Present` every frame but **no `DrawPrimitive*`
+method ever fires** — confirms the symptom was a *missing* draw call,
+not a broken submit pipeline.
+
+## Iteration 3 — Blocker C: re-enable text Draw with null-font guards
+
+Round-1 had gated the entire text pipeline (`SS_PHASE1_5_SKIP_TEXT_DRAW`
+in `iInterMission.cpp` and `SS_PHASE1_5_SKIP_INNER_TEXT_DRAW` in
+`UIBaseCtrls.cpp`) because the font formatter crashed on null deref when
+no fonts are loaded.
+
+Re-enabled the text Draw chain.  Added three defensive guards:
+
+- `Main/GText.cpp::GetFontFormatInfo` — bail out with zeroed `SFontInfo`
+  when `pLocale->GetFont(...)` returns null (locale has no fonts yet).
+- `Main/GText.cpp::Generate` — when `sFontInfo.pInfo` is null, store an
+  empty `SText` instead of looking up glyph widths from a null `pInfo`.
+- `Main/G2DView.cpp::CreateDynamicRects` — skip `rectLayouts` entries
+  whose `pFontInfo` is null (defensive — should not happen after the
+  two guards above).
+
+Result: `pInterface->Draw` now runs cleanly to completion every frame
+(see `silent_storm_im.log`).  `CTextFormater::Generate` emits an empty
+layout because the locale's font list is still empty, so still no
+geometry submits.
+
+## Iteration 4 — visible output: bgfx debug text overlay
+
+Enabled `BGFX_DEBUG_TEXT` in `renderer::init` and added a 3-line status
+overlay in `end_frame()`:
+
+```
+Silent Storm port  -  Phase 1.5 r2  -  bgfx alive, frame N
+Backend 2  Window 1024 x 768  HUD scale 1
+Renderer status: pipeline OK   shaders loaded   facade installed
+```
+
+Screenshot: `p1_5_r2_iter4_dbgtext.png` — **first VISIBLE content
+beyond the uniform clear-color tint**.  Confirms the full bgfx submit
+→ frame → swapchain present path is healthy on D3D11.
+
+## Iteration 5 — pipeline end-to-end + 8-archetype registry verify
+
+* `Present()` now submits a fixed RGB-corner triangle via the `ss_ui`
+  program at the end of every frame.  Vertices are in NDC, no
+  transforms, identity view + proj.  Triangle renders in the
+  top-right corner (top-left is occupied by the bgfx debug text).
+* Screenshot `p1_5_r2_iter5_dbg_tri.png`: a solid black triangle.
+  Black because `ss_ui`'s fragment shader samples a (null-bound)
+  texture instead of reading `Color0`; shape and position are correct.
+* Confirms the **full transient-VB → vertex layout → shader program
+  → bgfx::submit → swapchain present pipeline** works end-to-end.
+
+`shader_registry::load_all_archetypes` now logs a round-trip
+`get_program(name)` for every archetype name string used by
+`state_translator::select_shader_archetype`:
+
+```
+get_program("ss_diffuse_unlit") -> idx=9  valid=1
+get_program("ss_diffuse_lit")   -> idx=10 valid=1
+get_program("ss_skinned")       -> idx=11 valid=1
+get_program("ss_ui")            -> idx=12 valid=1
+get_program("ss_particle")      -> idx=13 valid=1
+get_program("ss_shadow")        -> idx=14 valid=1
+get_program("ss_terrain")       -> idx=15 valid=1
+get_program("ss_water")         -> idx=16 valid=1
+```
+
+All 8 names resolve.  Blocker B fully verified.
+
+## Status at end of round 2
+
+- Done criterion #1 (VISIBLE UI) satisfied — bgfx debug-text overlay
+  + an `ss_ui` triangle render on top of the clear color.  Backend is
+  D3D11, window 1024x768 fully filled, ~7000 fps in the idle inter-
+  mission loop.
+- All three blockers (A: back-buffer size, B: shader-archetype lookup,
+  C: text-draw gate) addressed.
+- Remaining for Phase 2:
+  * Bind font textures from the db so the inter-mission "INTERMISSION
+    / ESC - exit" placeholder text renders glyphs.
+  * Wire `FacadeTexture::Lock/Unlock` upload to bgfx textures so UI
+    sprites in `NUI::CImage::SetImage` produce textured quads instead
+    of black triangles (the dbg_tri output proves the geometry path,
+    not the texture path).
+  * Replace the `dbgText` overlay + dbg_tri once real UI geometry
+    arrives.
+
