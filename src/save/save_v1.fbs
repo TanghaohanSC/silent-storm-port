@@ -1,0 +1,82 @@
+// Silent Storm save game v1 — flatbuffers schema.
+//
+// Stable schema; new fields are added at the END of each table and made
+// optional with defaults so v2 readers can open v1 files (and vice versa).
+// flatbuffers' wire format guarantees forward/backward compat as long as
+// these rules are honoured.
+//
+// Phase 7 covers the *infrastructure*.  Mid-mission round-trip from
+// silent_storm.exe waits for the parallel renderer work to advance the
+// boot path past Nival's intermission placeholder; until then the
+// schema and the C++ save/load wrappers are exercised by
+// `ss_save_test`.
+
+// Note: kept in a *child* namespace `silent_storm.save.fb` so the POD
+// mirror types in `silent_storm::save` (Vec3, KeyValue, UnitState,
+// MissionState, GameState) don't collide with the generated reader
+// types that share names with the .fbs tables.
+namespace silent_storm.save.fb;
+
+// ----- Leaves --------------------------------------------------------------
+
+table Vec3 {
+    x: float;
+    y: float;
+    z: float;
+}
+
+table KeyValue {
+    key: string;
+    value: string;
+}
+
+// ----- Aggregates ----------------------------------------------------------
+
+table Unit {
+    id: uint32;
+    name: string;
+    archetype_id: uint32;
+    position: Vec3;
+    rotation: float;
+    hp: int32;
+    hp_max: int32;
+    ap: int32;
+    ap_max: int32;
+    side: uint8;                  // 0=allies, 1=axis, ...
+    inventory_item_ids: [uint32];
+    perks: [uint16];
+    state_flags: uint32;
+}
+
+table Mission {
+    id: string;
+    map_path: string;
+    turn_counter: uint32;
+    active_side: uint8;
+    objectives_complete: [uint32];
+    objectives_failed: [uint32];
+}
+
+// ----- Root ----------------------------------------------------------------
+
+table Save {
+    schema_version: uint32 = 1;
+    timestamp_unix: uint64;
+    slot_name: string;
+    mission: Mission;
+    units: [Unit];
+    rng_seed: uint64;
+    // Free-form bag for things we don't yet model — string-encoded blobs.
+    // v2 features should claim concrete fields (above) rather than living
+    // here forever.
+    extras: [KeyValue];
+}
+
+root_type Save;
+
+// File identifier — first 4 bytes after the offset.  Lets sanity-check
+// a buffer before trusting GetSizePrefixedSave / GetSave.
+file_identifier "SSV1";
+// Optional file extension used when writing FlatBufferBuilder output to
+// disk with the WriteSizePrefixedFlatBuffer helper.  We use ".sav" anyway.
+file_extension "sav";
