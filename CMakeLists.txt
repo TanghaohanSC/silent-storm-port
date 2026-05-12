@@ -104,6 +104,7 @@ target_include_directories(jan03_Main PRIVATE
     ${CMAKE_SOURCE_DIR}/src/stubs/lshead
     ${CMAKE_SOURCE_DIR}/src/stubs/s3tc_shim
 )
+target_compile_definitions(jan03_Main PRIVATE SS_USE_BGFX_FACADE)
 
 # --- Game.exe: WinMain + main loop. Links statically against everything. ---
 set(JAN03_GAME_DIR "${CMAKE_SOURCE_DIR}/../upstream/Soft/Andy/Jan03/a5dll/Game")
