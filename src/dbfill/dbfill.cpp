@@ -89,6 +89,19 @@ static void WriteVecRefSlot(void* vecPtr, int elemIdx, CDBRecord* pTarget)
     *reinterpret_cast<CDBRecord**>(slot) = pTarget;
 }
 
+// r46: typed scalar-vector writers. Each is a thin resize+assign over the
+// raw std::vector<T>. Element types listed in the schema (vec_int/bool/...)
+// drive which writer dbfill calls.
+template <typename T>
+static void WriteVecScalarSlot(void* vecPtr, int elemIdx, const T& val)
+{
+    std::vector<T>* v = reinterpret_cast<std::vector<T>*>(vecPtr);
+    if ((int)v->size() <= elemIdx) {
+        v->resize(elemIdx + 1);
+    }
+    (*v)[elemIdx] = val;
+}
+
 static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE* log,
                         int* refsFilledOut, int* refsMissedOut,
                         int* vecRefsFilledOut, int* vecRefsMissedOut)
@@ -233,6 +246,73 @@ static int FillOneTable(CDBTableBase* table, const NDb::SColumnInfo* cols, FILE*
                     if (!pRefTarget) { ++vecRefsMissed; break; }
                     void* vec = (char*)rec + c->offset;
                     WriteVecRefSlot(vec, c->subOffset, pRefTarget);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
+                case 7: { // r46: vec_int — vector<int>[idx] = stored int
+                    std::map<std::string, int>::const_iterator it = idx.intCols.find(cname);
+                    if (it == idx.intCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (j >= (int)s->m_buckets[row].size()) { ++vecRefsMissed; break; }
+                    void* vec = (char*)rec + c->offset;
+                    WriteVecScalarSlot<int>(vec, c->subOffset, s->m_buckets[row][j]);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
+                case 8: { // r46: vec_bool — vector<bool> uses bit-packed STL;
+                    // we treat each as a vector<unsigned char> for safety, but
+                    // since std::vector<bool> isn't bit-compatible with that,
+                    // we instead use the typed bool overload (which handles
+                    // the proxy reference correctly via assignment to (*v)[i]).
+                    std::map<std::string, int>::const_iterator it = idx.intCols.find(cname);
+                    if (it == idx.intCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (j >= (int)s->m_buckets[row].size()) { ++vecRefsMissed; break; }
+                    void* vec = (char*)rec + c->offset;
+                    std::vector<bool>* vb = reinterpret_cast<std::vector<bool>*>(vec);
+                    if ((int)vb->size() <= c->subOffset) vb->resize(c->subOffset + 1);
+                    (*vb)[c->subOffset] = (s->m_buckets[row][j] != 0);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
+                case 9: { // r46: vec_float — vector<float>[idx] = float bits
+                    std::map<std::string, int>::const_iterator it = idx.floatCols.find(cname);
+                    if (it == idx.floatCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (row >= (int)s->m_chainNext.size() || j >= (int)s->m_chainNext[row].size()) { ++vecRefsMissed; break; }
+                    int bits = s->m_chainNext[row][j];
+                    float f = *reinterpret_cast<float*>(&bits);
+                    void* vec = (char*)rec + c->offset;
+                    WriteVecScalarSlot<float>(vec, c->subOffset, f);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
+                case 10: { // r46: vec_string — vector<std::string>[idx] (narrow)
+                    std::map<std::string, int>::const_iterator it = idx.wstrCols.find(cname);
+                    if (it == idx.wstrCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (row >= (int)s->m_wstrings.size() || j >= (int)s->m_wstrings[row].size()) { ++vecRefsMissed; break; }
+                    const std::wstring& w = s->m_wstrings[row][j];
+                    std::string narrow;
+                    narrow.reserve(w.size());
+                    for (size_t k = 0; k < w.size(); ++k) narrow.push_back(static_cast<char>(w[k]));
+                    void* vec = (char*)rec + c->offset;
+                    WriteVecScalarSlot<std::string>(vec, c->subOffset, narrow);
+                    ++vecRefsFilled;
+                    ++filled;
+                    break;
+                }
+                case 11: { // r46: vec_wstring — vector<std::wstring>[idx]
+                    std::map<std::string, int>::const_iterator it = idx.wstrCols.find(cname);
+                    if (it == idx.wstrCols.end()) { ++vecRefsMissed; break; }
+                    int j = it->second;
+                    if (row >= (int)s->m_wstrings.size() || j >= (int)s->m_wstrings[row].size()) { ++vecRefsMissed; break; }
+                    void* vec = (char*)rec + c->offset;
+                    WriteVecScalarSlot<std::wstring>(vec, c->subOffset, s->m_wstrings[row][j]);
                     ++vecRefsFilled;
                     ++filled;
                     break;

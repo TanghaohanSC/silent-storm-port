@@ -40,6 +40,14 @@ T_REF = 5
 # `refClass` names the inner class (X). Runtime: resize vector to idx+1
 # if needed, then write resolved ref into element[idx].ptr.
 T_VEC_REF = 6
+# r46: vector<int>/<bool>/<float>/<string>/<wstring> element writes. Same
+# layout convention as T_VEC_REF (offset=vector, subOffset=index), but the
+# runtime resizes a typed vector and writes the scalar value (no ref deref).
+T_VEC_INT = 7
+T_VEC_BOOL = 8
+T_VEC_FLOAT = 9
+T_VEC_STRING = 10
+T_VEC_WSTRING = 11
 
 # C++ leaf-type spellings → type code (used after stripping const/refs).
 PRIMITIVE_TYPE_MAP = {
@@ -90,7 +98,11 @@ NAME_TYPE_FALLBACK = [
 
 
 def code_to_comment(code: int) -> str:
-    return {0: "int", 1: "bool", 2: "float", 3: "string", 4: "wstring", 5: "ref", 6: "vec_ref"}[code]
+    return {
+        0: "int", 1: "bool", 2: "float", 3: "string", 4: "wstring", 5: "ref",
+        6: "vec_ref", 7: "vec_int", 8: "vec_bool", 9: "vec_float",
+        10: "vec_string", 11: "vec_wstring",
+    }[code]
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +831,10 @@ def main() -> int:
     VEC_OF_PTR_RE = re.compile(
         r"^(?:const\s+)?(?:std::)?vector\s*<\s*(?:CPtr|CRndPtr|CDBPtr|CWeakPtr|CObj)\s*<\s*([A-Za-z_][\w:]*)\s*>\s*>\s*$",
     )
+    # r46: detect vector<PRIMITIVE> with primitive types we can store inline.
+    VEC_OF_SCALAR_RE = re.compile(
+        r"^(?:const\s+)?(?:std::)?vector\s*<\s*([A-Za-z_:][\w:]*)\s*>\s*$",
+    )
 
     def member_is_container(cls, name):
         t = member_decl_type(cls, name)
@@ -838,6 +854,29 @@ def main() -> int:
             return None
         inner = m.group(1).strip().rsplit("::", 1)[-1]
         return inner
+
+    def member_vec_scalar_kind(cls, name):
+        """If `cls::name` is a vector<int>/<bool>/<float>/<string>/<wstring>,
+        return one of T_VEC_INT/.../T_VEC_WSTRING; else None."""
+        t = member_decl_type(cls, name)
+        if not t:
+            return None
+        t = t.strip()
+        m = VEC_OF_SCALAR_RE.match(t)
+        if not m:
+            return None
+        inner = m.group(1).strip().rsplit("::", 1)[-1]
+        if inner == "bool":
+            return T_VEC_BOOL
+        if inner == "float" or inner == "double":
+            return T_VEC_FLOAT
+        if inner in ("string", "std::string"):
+            return T_VEC_STRING
+        if inner in ("wstring", "std::wstring"):
+            return T_VEC_WSTRING
+        if inner in ("int", "unsigned", "long", "short", "DWORD", "BYTE", "WORD", "UINT", "INT", "char"):
+            return T_VEC_INT
+        return None
 
     all_parsed = []
     all_skipped = []
@@ -892,6 +931,7 @@ def main() -> int:
     dropped_local_count = 0
     dropped_container_idx_count = 0
     kept_vec_ref_count = 0
+    kept_vec_scalar_count = 0
     for p in all_parsed:
         kept = []
         for c in p.fields:
@@ -900,16 +940,21 @@ def main() -> int:
                 continue
             if c.idx is not None and member_is_container(p.class_name, c.outer):
                 inner = member_vec_inner_class(p.class_name, c.outer)
-                if inner is None:
-                    # not vector<CPtr<X>> — still un-fillable (e.g. vector<int>
-                    # indexed; vector<CObj<...>> with non-record element type).
-                    dropped_container_idx_count += 1
+                if inner is not None:
+                    # vector<CPtr<X>> at outer[idx] — keep as T_VEC_REF.
+                    c._vec_inner = inner
+                    kept.append(c)
+                    kept_vec_ref_count += 1
                     continue
-                # vector<CPtr<X>> at outer[idx] — keep as T_VEC_REF.
-                # Stash the resolved inner class on the call so emit can use it.
-                c._vec_inner = inner
-                kept.append(c)
-                kept_vec_ref_count += 1
+                # Try vector<scalar>: vector<int>/<float>/<string>/<wstring>/<bool>
+                vec_scalar_kind = member_vec_scalar_kind(p.class_name, c.outer)
+                if vec_scalar_kind is not None:
+                    c._vec_scalar_kind = vec_scalar_kind
+                    kept.append(c)
+                    kept_vec_scalar_count += 1
+                    continue
+                # not a supported indexed-vector pattern — drop.
+                dropped_container_idx_count += 1
                 continue
             kept.append(c)
         p.fields = kept
@@ -957,10 +1002,13 @@ def main() -> int:
         # Compute column width for tidy formatting.
         max_name_len = max((len(c.colname) for c in p.fields), default=0)
         for call in p.fields:
-            # r44: vector<CPtr<X>>[idx] entries were tagged with _vec_inner.
+            # r44/r46: indexed-vector entries were tagged.
             vec_inner = getattr(call, "_vec_inner", None)
+            vec_scalar_kind = getattr(call, "_vec_scalar_kind", None)
             if vec_inner is not None:
                 tcode = T_VEC_REF
+            elif vec_scalar_kind is not None:
+                tcode = vec_scalar_kind
             else:
                 tcode = resolve_type_code(cls, call.outer, call.sub, header_infos)
             name_lit = f'"{call.colname}",'
@@ -970,9 +1018,10 @@ def main() -> int:
             # into the outer offset using a (char*)&p->outer[idx] - (char*)p
             # cast — works because the result is constexpr-foldable for
             # POD types and small literal indices.
-            if tcode == T_VEC_REF:
-                # r44: offset points at the VECTOR (not the element); idx
-                # lives in subOffset so the runtime can resize + write.
+            is_vec_typed = tcode in (T_VEC_REF, T_VEC_INT, T_VEC_BOOL, T_VEC_FLOAT, T_VEC_STRING, T_VEC_WSTRING)
+            if is_vec_typed:
+                # offset points at the VECTOR (not the element); idx lives
+                # in subOffset so the runtime can resize + write.
                 offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
             elif call.idx is not None:
                 offset_expr = (
@@ -980,7 +1029,7 @@ def main() -> int:
                 )
             else:
                 offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
-            if tcode == T_VEC_REF:
+            if is_vec_typed:
                 sub_expr = str(call.idx)
             elif call.sub is None:
                 sub_expr = "0"
@@ -1159,6 +1208,7 @@ def main() -> int:
     print(f"Dropped ImportFields (local var, not class member): {dropped_local_count}")
     print(f"Dropped ImportFields (indexed access into vector/list): {dropped_container_idx_count}")
     print(f"Kept ImportFields (T_VEC_REF, vector<CPtr<X>>[idx]):    {kept_vec_ref_count}")
+    print(f"Kept ImportFields (T_VEC_*, vector<scalar>[idx]):      {kept_vec_scalar_count}")
     print(f"Unresolved enum-named indices: {unresolved_enum_idx}")
     print(f"Enum constants captured: {len(enum_values)}")
     print(f"Classes skipped: {len(all_skipped)}")

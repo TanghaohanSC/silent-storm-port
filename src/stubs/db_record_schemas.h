@@ -968,6 +968,9 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CWaypoint>() {
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBPerk>() {
     static const SColumnInfo cols[] = {
         { "UserName",     3, offsetof(NDb::CDBPerk, szUserName), 0, nullptr },  // string
+        { "Param1",       9, offsetof(NDb::CDBPerk, params), 0, nullptr },  // vec_float
+        { "Param2",       9, offsetof(NDb::CDBPerk, params), 1, nullptr },  // vec_float
+        { "Param3",       9, offsetof(NDb::CDBPerk, params), 2, nullptr },  // vec_float
         { "IDText",       3, offsetof(NDb::CDBPerk, szID), 0, nullptr },  // string
         { "ToolTip",      5, offsetof(NDb::CDBPerk, pToolTip), 0, "CString" },  // ref
         { "Icon",         5, offsetof(NDb::CDBPerk, pIcon), 0, "CUITexture" },  // ref
@@ -1557,6 +1560,9 @@ template<> inline const SColumnInfo* GetSchemaFor<NDb::CRPGItem2Uniform>() {
 template<> inline const SColumnInfo* GetSchemaFor<NDb::CDBScenarioZone>() {
     static const SColumnInfo cols[] = {
         { "Scenario",         5, offsetof(NDb::CDBScenarioZone, pScenario), 0, "CDBScenario" },  // ref
+        { "TemplateID1",      7, offsetof(NDb::CDBScenarioZone, templatesIDs), 0, nullptr },  // vec_int
+        { "TemplateID2",      7, offsetof(NDb::CDBScenarioZone, templatesIDs), 1, nullptr },  // vec_int
+        { "TemplateID3",      7, offsetof(NDb::CDBScenarioZone, templatesIDs), 2, nullptr },  // vec_int
         { "ItemSlots",        0, offsetof(NDb::CDBScenarioZone, nItemSlots), 0, nullptr },  // int
         { "PersonSlots",      0, offsetof(NDb::CDBScenarioZone, nPersonSlots), 0, nullptr },  // int
         { "SmallDescription", 3, offsetof(NDb::CDBScenarioZone, sSmallDescription), 0, nullptr },  // string
