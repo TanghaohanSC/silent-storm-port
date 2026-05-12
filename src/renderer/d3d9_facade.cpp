@@ -1315,36 +1315,41 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
     if (current_vdecl_) {
         auto* fd = static_cast<FacadeVertexDeclaration*>(current_vdecl_);
         layout = make_layout_from_decl(fd->elements.data(), stride);
-        static int once_decl = 0;
-        if (once_decl < 6) {
-            ++once_decl;
+        // r65: track unique (VB,stride) pairs so we get a wider sampling of
+        // what's being drawn — not just the same UI mesh.
+        static const void* s_seen_vb[16] = {};
+        static int s_seen_count = 0;
+        bool first_seen = true;
+        for (int i = 0; i < s_seen_count; ++i) if (s_seen_vb[i] == vb) { first_seen = false; break; }
+        if (first_seen && s_seen_count < 16) {
+            s_seen_vb[s_seen_count++] = vb;
             if (FILE* f = draw_log()) {
-                fprintf(f, "[decl#%d] elements:", once_decl);
+                fprintf(f, "[vb#%d=%p] decl_stride=%u d3d_stride=%u vb_size=%u",
+                        s_seen_count, vb, layout.getStride(), stride, vb_cpu_size);
+                fprintf(f, "  elements:");
                 for (const auto& e : fd->elements) {
                     if (e.Stream == 0xFF) break;
-                    fprintf(f, " s=%u off=%u type=%u use=%u/%u",
+                    fprintf(f, " (s=%u o=%u t=%u u=%u/%u)",
                             e.Stream, e.Offset, e.Type, e.Usage, e.UsageIndex);
                 }
-                fprintf(f, " layout_stride=%u d3d_stride=%u\n",
-                        layout.getStride(), stride);
-                // Dump first 8 vertex positions & some indices
+                fprintf(f, "\n");
                 const uint8_t* vd = vb->cpu_data();
-                const uint32_t* iw = reinterpret_cast<const uint32_t*>(vd);
-                for (int v = 0; v < 8 && (uint64_t)(v+1)*stride <= vb->cpu_size(); ++v) {
+                // Sample first 4 verts pos
+                for (int v = 0; v < 4 && (uint64_t)(v+1)*stride <= vb->cpu_size(); ++v) {
                     float fx, fy, fz;
                     std::memcpy(&fx, vd + v*stride + 0, 4);
                     std::memcpy(&fy, vd + v*stride + 4, 4);
                     std::memcpy(&fz, vd + v*stride + 8, 4);
                     fprintf(f, "  v%d=(%.3f, %.3f, %.3f)\n", v, fx, fy, fz);
                 }
-                (void)iw;
-                if (ib_cpu_size >= 24) {
-                    const uint16_t* idx16 = reinterpret_cast<const uint16_t*>(ib->cpu_data());
-                    fprintf(f, "  first 12 idx16: %u %u %u  %u %u %u  %u %u %u  %u %u %u\n",
-                            idx16[0], idx16[1], idx16[2],
-                            idx16[3], idx16[4], idx16[5],
-                            idx16[6], idx16[7], idx16[8],
-                            idx16[9], idx16[10], idx16[11]);
+                // Also sample a far vertex (in case first 8 are header/padding)
+                UINT mid = vb->cpu_size() / (stride * 2);
+                if (mid > 0 && (uint64_t)(mid+1)*stride <= vb->cpu_size()) {
+                    float fx, fy, fz;
+                    std::memcpy(&fx, vd + mid*stride + 0, 4);
+                    std::memcpy(&fy, vd + mid*stride + 4, 4);
+                    std::memcpy(&fz, vd + mid*stride + 8, 4);
+                    fprintf(f, "  v_mid[%u]=(%.3f, %.3f, %.3f)\n", mid, fx, fy, fz);
                 }
                 fflush(f);
             }
