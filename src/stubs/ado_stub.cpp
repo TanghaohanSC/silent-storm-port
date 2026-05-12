@@ -39,7 +39,21 @@ using namespace std;
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\Misc\basic2.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\Misc\BasicFactory.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\FileIO\BasicChunk1.h"
+#include "db_table_storage.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
+#include <map>
+// silent-storm-port r15: temporary backref while CDBTableBase::operator& runs.
+// Populated by PortReadCDBTableStorage; consumed + cleared by PromoteRecordsFromStorage.
+static std::map<CDBTableBase*, CObj<CDBTableDataStorage> > s_tableToStorage;
+
+void PortReadCDBTableStorage( CStructureSaver& f, CDBTableBase* pTable )
+{
+    CObj<CDBTableDataStorage> storage;
+    f.Add( 1, &storage );
+    if ( storage.GetPtr() ) {
+        s_tableToStorage[pTable] = storage;
+    }
+}
 
 namespace NDatabase
 {
@@ -103,6 +117,45 @@ void NDatabase::Refresh(int /*nTableID*/)
     ASSERT(0);
 }
 
+// silent-storm-port r15: scan storage objects loaded by PortReadCDBTableStorage,
+// create empty records (no body decode for now), populate CDBTableBase::records
+// hash_map so GetDBRecord(nID) finds a non-null entry. This eliminates the 335
+// BasicDB.h:102 cascade asserts seen in r14. Records have correct nID but
+// default-initialized data fields — sufficient for the assert path; downstream
+// record-content reads will see defaults until body bytes are decoded in r16.
+static void PromoteRecordsFromStorage()
+{
+    NDatabase::CTablesHash& tables = NDatabase::GetTables();
+    CClassFactory<CDBRecord>& factory = NDatabase::GetRecordTypes();
+    int nPromoted = 0;
+    int nStorages = (int)s_tableToStorage.size();
+    for (std::map<CDBTableBase*, CObj<CDBTableDataStorage> >::iterator
+         it = s_tableToStorage.begin(); it != s_tableToStorage.end(); ++it) {
+        CDBTableBase* pTable = it->first;
+        CDBTableDataStorage* pStorage = it->second.GetPtr();
+        if (!pStorage) continue;
+        int nTableID = -1;
+        for (NDatabase::CTablesHash::iterator tk = tables.begin(); tk != tables.end(); ++tk) {
+            if (&tk->second == pTable) { nTableID = tk->first; break; }
+        }
+        if (nTableID < 0) continue;
+        for (size_t i = 0; i < pStorage->m_records.size(); ++i) {
+            CDBRecord* p = factory.CreateObject(nTableID);
+            if (p) {
+                pTable->InsertRecord(pStorage->m_records[i].id, p);
+                ++nPromoted;
+            }
+        }
+    }
+    s_tableToStorage.clear();
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r15_promote.log", "w");
+    if (fp) {
+        fprintf(fp, "r15 promoted %d records from %d storage objects\n",
+                nPromoted, nStorages);
+        fclose(fp);
+    }
+}
+
 void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
 {
     CTablesHash& tables = GetTables();
@@ -111,6 +164,7 @@ void NDatabase::Serialize(CDataStream& file, CStructureSaver::EMode mode)
         CStructureSaver f(file, mode);
         f.Add(1, &tables);
     }
+    PromoteRecordsFromStorage();
     NDatabase::bIsDatabaseLoading = false;
 }
 
