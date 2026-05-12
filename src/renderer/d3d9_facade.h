@@ -188,6 +188,18 @@ private:
     UINT  stream_stride_[8]                  = {};
     IDirect3DIndexBuffer9*  ibo_             = nullptr;
 
+    // r62: track current vertex declaration so DrawIndexedPrimitive can build
+    // a bgfx VertexLayout matching the actual D3D9 vertex elements (Nival uses
+    // declarations, not FVF, so make_layout_from_fvf(0,...) was returning a
+    // position-only layout that lost normal/texcoord/color).
+    IDirect3DVertexDeclaration9* current_vdecl_ = nullptr;
+
+    // r62: track when Nival has installed a programmable VS/PS — these signal
+    // "do not use fixed-function transforms; the shader gets its matrix from
+    // vs_const_f_[0..3]" (a near-universal D3D9 convention).
+    IDirect3DVertexShader9* current_vs_ = nullptr;
+    IDirect3DPixelShader9*  current_ps_ = nullptr;
+
     // Current bgfx view ID (0 by default). SetRenderTarget bumps this.
     uint16_t current_view_id_ = 0;
 

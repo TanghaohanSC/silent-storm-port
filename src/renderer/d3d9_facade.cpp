@@ -956,6 +956,79 @@ float   __stdcall D3D9Facade::GetNPatchMode() { return 0.0f; }
 // ---------------------------------------------------------------------------
 namespace {
 
+// r62: convert a D3D9 vertex declaration into a bgfx VertexLayout. Walks
+// the FacadeVertexDeclaration's element array (terminated by D3DDECL_END).
+// Maps:
+//   D3DDECLUSAGE_POSITION   -> bgfx::Attrib::Position
+//   D3DDECLUSAGE_NORMAL     -> bgfx::Attrib::Normal
+//   D3DDECLUSAGE_COLOR (n)  -> bgfx::Attrib::Color0/1
+//   D3DDECLUSAGE_TEXCOORD(n)-> bgfx::Attrib::TexCoord0..7
+//   D3DDECLUSAGE_BLENDWEIGHT-> Attrib::Weight
+//   D3DDECLUSAGE_BLENDINDICES->Attrib::Indices
+// Skips unknown usages (binormal/tangent etc — bgfx has slots, omit for now).
+// Returns a layout matching the on-disk stride so DrawIndexedPrimitive's
+// 1:1 memcpy gives bgfx every byte the shader expects.
+bgfx::VertexLayout make_layout_from_decl(const D3DVERTEXELEMENT9* elements, UINT stride) {
+    bgfx::VertexLayout l;
+    l.begin();
+    if (!elements) {
+        l.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+        l.end();
+        return l;
+    }
+    for (int i = 0; i < 64; ++i) {
+        const D3DVERTEXELEMENT9& e = elements[i];
+        if (e.Stream == 0xFF) break;  // D3DDECL_END
+        if (e.Stream != 0) continue;  // we only handle stream 0
+        bgfx::Attrib::Enum attr = bgfx::Attrib::Position;
+        bool valid = true;
+        switch (e.Usage) {
+            case D3DDECLUSAGE_POSITION:   attr = bgfx::Attrib::Position; break;
+            case D3DDECLUSAGE_NORMAL:     attr = bgfx::Attrib::Normal;   break;
+            case D3DDECLUSAGE_COLOR:
+                attr = (e.UsageIndex == 0) ? bgfx::Attrib::Color0 : bgfx::Attrib::Color1;
+                break;
+            case D3DDECLUSAGE_TEXCOORD:
+                if (e.UsageIndex < 8) {
+                    attr = static_cast<bgfx::Attrib::Enum>(
+                        static_cast<int>(bgfx::Attrib::TexCoord0) + e.UsageIndex);
+                } else valid = false;
+                break;
+            case D3DDECLUSAGE_BLENDWEIGHT: attr = bgfx::Attrib::Weight;  break;
+            case D3DDECLUSAGE_BLENDINDICES:attr = bgfx::Attrib::Indices; break;
+            case D3DDECLUSAGE_TANGENT:    attr = bgfx::Attrib::Tangent;  break;
+            case D3DDECLUSAGE_BINORMAL:   attr = bgfx::Attrib::Bitangent;break;
+            default: valid = false; break;
+        }
+        if (!valid) continue;
+        int num = 4;
+        bgfx::AttribType::Enum t = bgfx::AttribType::Float;
+        bool normalized = false;
+        switch (e.Type) {
+            case D3DDECLTYPE_FLOAT1: num=1; t=bgfx::AttribType::Float; break;
+            case D3DDECLTYPE_FLOAT2: num=2; t=bgfx::AttribType::Float; break;
+            case D3DDECLTYPE_FLOAT3: num=3; t=bgfx::AttribType::Float; break;
+            case D3DDECLTYPE_FLOAT4: num=4; t=bgfx::AttribType::Float; break;
+            case D3DDECLTYPE_D3DCOLOR:
+                num=4; t=bgfx::AttribType::Uint8; normalized=true;
+                break;
+            case D3DDECLTYPE_UBYTE4: num=4; t=bgfx::AttribType::Uint8; normalized=false; break;
+            case D3DDECLTYPE_UBYTE4N: num=4; t=bgfx::AttribType::Uint8; normalized=true; break;
+            case D3DDECLTYPE_SHORT2: num=2; t=bgfx::AttribType::Int16; normalized=false; break;
+            case D3DDECLTYPE_SHORT4: num=4; t=bgfx::AttribType::Int16; normalized=false; break;
+            case D3DDECLTYPE_SHORT2N:num=2; t=bgfx::AttribType::Int16; normalized=true; break;
+            case D3DDECLTYPE_SHORT4N:num=4; t=bgfx::AttribType::Int16; normalized=true; break;
+            case D3DDECLTYPE_FLOAT16_2: num=2; t=bgfx::AttribType::Half; break;
+            case D3DDECLTYPE_FLOAT16_4: num=4; t=bgfx::AttribType::Half; break;
+            default: continue;
+        }
+        l.add(attr, static_cast<uint8_t>(num), t, normalized);
+    }
+    l.end();
+    (void)stride;
+    return l;
+}
+
 // Build a generic transient vertex layout from FVF + stride.  This is a best-
 // effort mapping — Nival uses both FVF and shader-driven vertex decls; for v1
 // we only handle the simple FVF case.  Unsupported FVF returns a minimal
@@ -1034,6 +1107,113 @@ void apply_transform_matrix(const DeviceState& s) {
     bgfx::setTransform(bgfx_m);
 }
 
+// r62: when Nival uses programmable VS, SetTransform may never be called.
+// Their vertex shaders almost always upload the MVP matrix to c0..c3 via
+// SetVertexShaderConstantF. D3D9 shaders see c0..c3 as 4 row vectors stored
+// in *row-major* order; the shader code does `mul(mvp, position)` interpreted
+// as column-vector mul where mvp is set up as transpose of D3D's row-major.
+// Net: c0..c3 hold the WVP matrix transposed (the same way HLSL's
+// `mul(input.pos, world*view*proj)` would set it). For our bgfx side, we want
+// the column-major matrix that the shader's `u_modelViewProj * pos` expects.
+// Trial: write c0..c3 directly as the bgfx column matrix (4 floats per row,
+// taken in order) — this matches the standard D3D9 shader convention.
+// r62/r63: Nival writes their MVP matrix to c10..c13 (verified via dump:
+// first non-zero contiguous 4-vec block is at c10, with shape that matches an
+// ortho projection for UI overlays).  For 3D mission render they likely use
+// the same c10..c13 slot for view*proj and apply their own world matrix
+// inline.  Hard-code c10 as the matrix start; fall back to c0 if c10 looks
+// uninitialized.
+int find_matrix_start(const float vs_const_f[128][4]) {
+    const int candidates[] = { 10, 0, 4, 8, 16, 20 };
+    for (int s : candidates) {
+        bool nonzero = false;
+        for (int r = 0; r < 4; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                if (vs_const_f[s + r][c] != 0.0f) { nonzero = true; break; }
+            }
+            if (nonzero) break;
+        }
+        if (nonzero) return s;
+    }
+    return 0;
+}
+
+void apply_vs_const_transform(const float vs_const_f[128][4]) {
+    int s = find_matrix_start(vs_const_f);
+    float m[16];
+    // r63: Nival writes the MVP matrix in row-major form to c[s..s+3]:
+    //   c[s+r] = row r = (M[r][0], M[r][1], M[r][2], M[r][3])
+    // bgfx::setTransform expects column-major (m[c*4+r] = M[r][c]).
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            m[c * 4 + r] = vs_const_f[s + r][c];
+        }
+    }
+    bgfx::setTransform(m);
+
+    static int once = 0;
+    if (once < 4) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[vs_const#%d] picked start=c%d\n", once, s);
+            for (int i = 0; i < 32; ++i) {
+                bool any = vs_const_f[i][0] != 0 || vs_const_f[i][1] != 0 ||
+                           vs_const_f[i][2] != 0 || vs_const_f[i][3] != 0;
+                if (any) {
+                    fprintf(f, "  c%-2d=[%9.3f %9.3f %9.3f %9.3f]%s\n", i,
+                            vs_const_f[i][0], vs_const_f[i][1],
+                            vs_const_f[i][2], vs_const_f[i][3],
+                            (i >= s && i < s+4) ? " <-- mat" : "");
+                }
+            }
+            fprintf(f, "  bgfx m[col0]=(%.3f %.3f %.3f %.3f) m[col3]=(%.3f %.3f %.3f %.3f)\n",
+                    m[0], m[1], m[2], m[3], m[12], m[13], m[14], m[15]);
+            // Simulate transforming pos=(863.5, 31.5, 1.0)
+            float px = 863.5f, py = 31.5f, pz = 1.0f, pw = 1.0f;
+            float cx = m[0]*px + m[4]*py + m[8]*pz + m[12]*pw;
+            float cy = m[1]*px + m[5]*py + m[9]*pz + m[13]*pw;
+            float cz = m[2]*px + m[6]*py + m[10]*pz + m[14]*pw;
+            float cw = m[3]*px + m[7]*py + m[11]*pz + m[15]*pw;
+            fprintf(f, "  test pos(863.5,31.5,1.0) -> clip(%.3f, %.3f, %.3f, %.3f) ndc(%.3f, %.3f, %.3f)\n",
+                    cx, cy, cz, cw,
+                    cw != 0 ? cx/cw : 0, cw != 0 ? cy/cw : 0, cw != 0 ? cz/cw : 0);
+            fflush(f);
+        }
+    }
+}
+
+// r62: lazy-create 1x1 white texture used as fallback when no texture is bound
+// at stage 0 (so shaders that sample s_diffuse don't render black for missing
+// bindings).
+bgfx::TextureHandle get_fallback_white_texture() {
+    static bgfx::TextureHandle s_white = BGFX_INVALID_HANDLE;
+    if (!bgfx::isValid(s_white)) {
+        const uint32_t white = 0xffffffffu;
+        const bgfx::Memory* mem = bgfx::copy(&white, sizeof(white));
+        s_white = bgfx::createTexture2D(1, 1, false, 1,
+                                        bgfx::TextureFormat::BGRA8,
+                                        BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+                                        mem);
+    }
+    return s_white;
+}
+
+// r62: pick a shader archetype that matches the current state pipeline.
+// When Nival uses programmable VS+PS (current_vs_/current_ps_ set), the
+// state_translator's heuristics still tell us what *kind* of geometry it is
+// (lit terrain, particle, UI...).  We just override with ss_diffuse_unlit as
+// the safe baseline so position+texcoord visible geometry works first; later
+// rounds can tune per archetype.
+const char* select_archetype_for_drawpath(const DeviceState& s, bool programmable) {
+    if (programmable) {
+        // For programmable path, prefer ss_diffuse_unlit (it samples a 2D
+        // texture with position+texcoord) so geometry shows up even if no
+        // texture is bound (white fallback turns it into solid white).
+        return "ss_diffuse_unlit";
+    }
+    return s.select_shader_archetype();
+}
+
 } // anonymous namespace
 
 HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
@@ -1048,7 +1228,13 @@ HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
     UINT vb_cpu_size = vb->cpu_size();
     if (vb_cpu_size == 0) { trace_reason("DP.empty_cpu_vb", &g_reasons.empty_cpu_vb); return D3D_OK; }
 
-    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    bgfx::VertexLayout layout;
+    if (current_vdecl_) {
+        auto* fd = static_cast<FacadeVertexDeclaration*>(current_vdecl_);
+        layout = make_layout_from_decl(fd->elements.data(), stride);
+    } else {
+        layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    }
     const uint16_t layout_stride = layout.getStride();
 
     // Clamp by what cpu_buf can supply.
@@ -1077,8 +1263,11 @@ HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
     }
     ++g_reasons.real_data;
 
-    apply_transform_matrix(state_);
+    bool programmable_dp = (current_vs_ != nullptr);
+    if (programmable_dp) apply_vs_const_transform(vs_const_f_);
+    else                 apply_transform_matrix(state_);
     bgfx::setState(state_.build_bgfx_state());
+    bool any_tex_dp = false;
     for (int i = 0; i < 8; ++i) {
         if (state_.texture[i]) {
             auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
@@ -1086,12 +1275,16 @@ HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
                 bgfx::setTexture(static_cast<uint8_t>(i),
                                  get_sampler_uniform(static_cast<unsigned>(i)),
                                  tex->handle);
+                if (i == 0) any_tex_dp = true;
             }
         }
     }
+    if (!any_tex_dp) {
+        bgfx::setTexture(0, get_sampler_uniform(0), get_fallback_white_texture());
+    }
     bgfx::setVertexBuffer(0, &tvb);
 
-    const char* arch = state_.select_shader_archetype();
+    const char* arch = select_archetype_for_drawpath(state_, programmable_dp);
     bgfx::ProgramHandle prog = get_program(arch);
     if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
     else { trace_invalid_prog(arch); bgfx::discard(); }
@@ -1117,7 +1310,48 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
 
     if (vb_cpu_size == 0) { trace_reason("DIP.empty_cpu_vb", &g_reasons.empty_cpu_vb); return D3D_OK; }
 
-    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    // r62: prefer decl-driven layout over FVF when both are present (decl wins).
+    bgfx::VertexLayout layout;
+    if (current_vdecl_) {
+        auto* fd = static_cast<FacadeVertexDeclaration*>(current_vdecl_);
+        layout = make_layout_from_decl(fd->elements.data(), stride);
+        static int once_decl = 0;
+        if (once_decl < 6) {
+            ++once_decl;
+            if (FILE* f = draw_log()) {
+                fprintf(f, "[decl#%d] elements:", once_decl);
+                for (const auto& e : fd->elements) {
+                    if (e.Stream == 0xFF) break;
+                    fprintf(f, " s=%u off=%u type=%u use=%u/%u",
+                            e.Stream, e.Offset, e.Type, e.Usage, e.UsageIndex);
+                }
+                fprintf(f, " layout_stride=%u d3d_stride=%u\n",
+                        layout.getStride(), stride);
+                // Dump first 8 vertex positions & some indices
+                const uint8_t* vd = vb->cpu_data();
+                const uint32_t* iw = reinterpret_cast<const uint32_t*>(vd);
+                for (int v = 0; v < 8 && (uint64_t)(v+1)*stride <= vb->cpu_size(); ++v) {
+                    float fx, fy, fz;
+                    std::memcpy(&fx, vd + v*stride + 0, 4);
+                    std::memcpy(&fy, vd + v*stride + 4, 4);
+                    std::memcpy(&fz, vd + v*stride + 8, 4);
+                    fprintf(f, "  v%d=(%.3f, %.3f, %.3f)\n", v, fx, fy, fz);
+                }
+                (void)iw;
+                if (ib_cpu_size >= 24) {
+                    const uint16_t* idx16 = reinterpret_cast<const uint16_t*>(ib->cpu_data());
+                    fprintf(f, "  first 12 idx16: %u %u %u  %u %u %u  %u %u %u  %u %u %u\n",
+                            idx16[0], idx16[1], idx16[2],
+                            idx16[3], idx16[4], idx16[5],
+                            idx16[6], idx16[7], idx16[8],
+                            idx16[9], idx16[10], idx16[11]);
+                }
+                fflush(f);
+            }
+        }
+    } else {
+        layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    }
     const uint16_t layout_stride = layout.getStride();
 
     UINT num_indices = primCount * verts_per_prim(PrimitiveType);
@@ -1159,8 +1393,26 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
     }
     ++g_reasons.real_data;
 
-    apply_transform_matrix(state_);
-    bgfx::setState(state_.build_bgfx_state());
+    // r62: choose transform source based on pipeline mode
+    bool programmable = (current_vs_ != nullptr);
+    if (programmable) {
+        apply_vs_const_transform(vs_const_f_);
+    } else {
+        apply_transform_matrix(state_);
+    }
+    // r62: SOFT debug — relax state to ALWAYS depth + no cull so we at least
+    // see SOMETHING.  Keep color writes from D3D9.  Once we see geometry, we
+    // can put proper state back.
+    uint64_t st = state_.build_bgfx_state();
+    // strip depth test, cull bits — keep write_z so we get sensible occlusion
+    st &= ~(BGFX_STATE_DEPTH_TEST_MASK | BGFX_STATE_CULL_MASK);
+    st |= BGFX_STATE_DEPTH_TEST_ALWAYS;
+    // r63: ALSO strip blend bits (BLEND_MASK) to make output fully opaque.
+    st &= ~BGFX_STATE_BLEND_MASK;
+    bgfx::setState(st);
+
+    // r62: always bind stage 0 — fallback to 1x1 white if nothing bound.
+    bool any_tex = false;
     for (int i = 0; i < 8; ++i) {
         if (state_.texture[i]) {
             auto* tex = static_cast<FacadeTexture*>(state_.texture[i]);
@@ -1168,8 +1420,12 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
                 bgfx::setTexture(static_cast<uint8_t>(i),
                                  get_sampler_uniform(static_cast<unsigned>(i)),
                                  tex->handle);
+                if (i == 0) any_tex = true;
             }
         }
+    }
+    if (!any_tex) {
+        bgfx::setTexture(0, get_sampler_uniform(0), get_fallback_white_texture());
     }
     bgfx::setVertexBuffer(0, &tvb, /*offset*/ 0, /*numVertices*/ total_verts);
 
@@ -1206,7 +1462,7 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
     }
     (void)BaseVertexIndex;
 
-    const char* arch = state_.select_shader_archetype();
+    const char* arch = select_archetype_for_drawpath(state_, programmable);
     bgfx::ProgramHandle prog = get_program(arch);
     if (bgfx::isValid(prog)) {
         trace_submit(arch, prog);
@@ -1310,9 +1566,12 @@ HRESULT __stdcall D3D9Facade::ProcessVertices(UINT /*SrcStartIndex*/, UINT /*Des
 // ---------------------------------------------------------------------------
 // Vertex declaration / FVF
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::SetVertexDeclaration(IDirect3DVertexDeclaration9* /*pDecl*/) { return D3D_OK; }
+HRESULT __stdcall D3D9Facade::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
+    current_vdecl_ = pDecl;
+    return D3D_OK;
+}
 HRESULT __stdcall D3D9Facade::GetVertexDeclaration(IDirect3DVertexDeclaration9** ppDecl) {
-    if (ppDecl) *ppDecl = nullptr;
+    if (ppDecl) *ppDecl = current_vdecl_;
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::SetFVF(DWORD FVF) {
@@ -1328,15 +1587,28 @@ HRESULT __stdcall D3D9Facade::GetFVF(DWORD* pFVF) {
 // ---------------------------------------------------------------------------
 // Vertex shader
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::SetVertexShader(IDirect3DVertexShader9* /*pShader*/) { return D3D_OK; }
+HRESULT __stdcall D3D9Facade::SetVertexShader(IDirect3DVertexShader9* pShader) {
+    current_vs_ = pShader;
+    return D3D_OK;
+}
 HRESULT __stdcall D3D9Facade::GetVertexShader(IDirect3DVertexShader9** ppShader) {
-    if (ppShader) *ppShader = nullptr;
+    if (ppShader) *ppShader = current_vs_;
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::SetVertexShaderConstantF(UINT StartRegister, CONST float* pConstantData, UINT Vector4fCount) {
     if (!pConstantData) return D3DERR_INVALIDCALL;
     for (UINT i = 0; i < Vector4fCount && (StartRegister + i) < 128; ++i)
         std::memcpy(vs_const_f_[StartRegister + i], pConstantData + i * 4, sizeof(float) * 4);
+    static int once = 0;
+    if (once < 16) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[SetVSConstF#%d] start=%u count=%u first=[%.3f %.3f %.3f %.3f]\n",
+                    once, StartRegister, Vector4fCount,
+                    pConstantData[0], pConstantData[1], pConstantData[2], pConstantData[3]);
+            fflush(f);
+        }
+    }
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::GetVertexShaderConstantF(UINT StartRegister, float* pConstantData, UINT Vector4fCount) {
@@ -1419,9 +1691,12 @@ HRESULT __stdcall D3D9Facade::GetIndices(IDirect3DIndexBuffer9** ppIndexData) {
 // ---------------------------------------------------------------------------
 // Pixel shader
 // ---------------------------------------------------------------------------
-HRESULT __stdcall D3D9Facade::SetPixelShader(IDirect3DPixelShader9* /*pShader*/) { return D3D_OK; }
+HRESULT __stdcall D3D9Facade::SetPixelShader(IDirect3DPixelShader9* pShader) {
+    current_ps_ = pShader;
+    return D3D_OK;
+}
 HRESULT __stdcall D3D9Facade::GetPixelShader(IDirect3DPixelShader9** ppShader) {
-    if (ppShader) *ppShader = nullptr;
+    if (ppShader) *ppShader = current_ps_;
     return D3D_OK;
 }
 HRESULT __stdcall D3D9Facade::SetPixelShaderConstantF(UINT StartRegister, CONST float* pConstantData, UINT Vector4fCount) {
