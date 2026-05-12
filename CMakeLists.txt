@@ -145,10 +145,11 @@ if(MSVC)
     )
     # Phase 1.5: prevent linker dead-strip of REGISTER_SAVELOAD_CLASS
     # static initializers in Main. Without this, game.db deserialization
-    # asserts on missing class typeIDs.
+    # asserts on missing class typeIDs. Bisecting — try just Main first.
     target_link_options(silent_storm PRIVATE
         /WHOLEARCHIVE:Main
         /WHOLEARCHIVE:DBFormat
+        /MAP:$<TARGET_FILE_DIR:silent_storm>/silent_storm.map
     )
 endif()
 target_link_libraries(silent_storm PRIVATE
