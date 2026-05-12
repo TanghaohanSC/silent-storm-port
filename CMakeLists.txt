@@ -137,6 +137,7 @@ target_compile_definitions(silent_storm PRIVATE
     _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
     NOMINMAX WIN32_LEAN_AND_MEAN
     SS_USE_BGFX_FACADE     # phase 1 T9 — enable bgfx bootstrap in Main.cpp
+    SS_USE_SDL_INPUT       # phase 1.5 r6 — pump Win32 msgs into NInput in WndProc
 )
 if(MSVC)
     target_compile_options(silent_storm PRIVATE
