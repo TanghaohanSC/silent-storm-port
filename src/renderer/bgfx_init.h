@@ -76,4 +76,12 @@ void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2, unsigned a
 // for native size.  Coords are 1024x768 virtual; clipped silently to the
 // available glyph-quad pool.  Cleared automatically at end_frame().
 void ss_dbg_glyph_push(int virtX, int virtY, unsigned abgr, int scale_x, int scale_y, const char* text);
+
+// silent-storm-port r36 — explicit frame flush callable from the main loop
+// (NMainLoop::StepApp).  When the game is in a menu state with InitializeUIOnly
+// there's no CRenderBaseInterface::RenderFrame → no NGScene::Flip → no
+// d3d9_facade::Present → no bgfx::frame().  This entry unconditionally
+// touches view 0 and flushes a bgfx frame so the dbg-text overlay and any
+// queued ss_ui quads actually paint to the swap chain every loop iteration.
+void ss_present_frame();
 } // extern "C"

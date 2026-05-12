@@ -421,6 +421,15 @@ extern "C" void ss_dbg_rect_push(int virtX1, int virtY1, int virtX2, int virtY2,
     ++silent_storm::renderer::g_dbg_rect_count;
 }
 
+extern "C" void ss_present_frame() {
+    // silent-storm-port r36: emergency per-frame flush.  When upstream's
+    // RenderFrame path is bypassed (UI-only menu states), this is the ONLY
+    // call that advances bgfx and gets the dbg-text + ss_ui submissions to
+    // the screen.  Cheap; idempotent w.r.t. multiple BeginScene/Present
+    // pairs because end_frame() is the actual bgfx::frame() boundary.
+    silent_storm::renderer::end_frame();
+}
+
 extern "C" void ss_dbg_glyph_push(int virtX, int virtY, unsigned abgr,
                                   int scale_x, int scale_y, const char* text) {
     if (!text) return;
