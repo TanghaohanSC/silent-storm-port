@@ -22,7 +22,75 @@ namespace silent_storm::renderer {
 // ---------------------------------------------------------------------------
 namespace {
 D3D9Facade* g_instance = nullptr;
+
+// ----- Phase 1.5 r2 — draw-call trace (declared file-scope so BeginScene /
+// Present in the IDirect3DDevice9 method block can also reference them).
+FILE* draw_log() {
+    static FILE* f = nullptr;
+    if (!f) fopen_s(&f, "silent_storm_draw.log", "w");
+    return f;
 }
+uint64_t g_total_draw_calls = 0;
+uint64_t g_total_submits    = 0;
+bool     g_archetype_seen[16] = {};
+
+int archetype_index(const char* name) {
+    static const char* names[] = {
+        "ss_diffuse_unlit", "ss_diffuse_lit", "ss_skinned", "ss_ui",
+        "ss_particle", "ss_shadow", "ss_terrain", "ss_water",
+    };
+    if (!name) return -1;
+    for (int i = 0; i < 8; ++i) {
+        if (std::strcmp(names[i], name) == 0) return i;
+    }
+    return -1;
+}
+
+void trace_draw_entry(const char* fn) {
+    ++g_total_draw_calls;
+    if (g_total_draw_calls <= 16 || (g_total_draw_calls % 256) == 0) {
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[draw#%llu] %s\n",
+                    (unsigned long long)g_total_draw_calls, fn);
+            fflush(f);
+        }
+    }
+}
+
+void trace_submit(const char* arch, bgfx::ProgramHandle prog) {
+    ++g_total_submits;
+    int idx = archetype_index(arch);
+    if (idx >= 0 && !g_archetype_seen[idx]) {
+        g_archetype_seen[idx] = true;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[submit#%llu] FIRST %s prog.idx=%u valid=%d\n",
+                    (unsigned long long)g_total_submits,
+                    arch, prog.idx, (int)bgfx::isValid(prog));
+            fflush(f);
+        }
+    }
+    if (g_total_submits <= 8) {
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[submit#%llu] %s prog.idx=%u valid=%d\n",
+                    (unsigned long long)g_total_submits,
+                    arch ? arch : "(null)", prog.idx, (int)bgfx::isValid(prog));
+            fflush(f);
+        }
+    }
+}
+
+void trace_invalid_prog(const char* arch) {
+    static int once = 0;
+    if (once < 8) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[discard] no program for archetype '%s' — bgfx::discard()\n",
+                    arch ? arch : "(null)");
+            fflush(f);
+        }
+    }
+}
+} // namespace
 
 IDirect3DDevice9* facade_instance() {
     if (!g_instance)
@@ -237,6 +305,17 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
         // to submit (otherwise frame() emits a "no submit" warning).
         bgfx::touch(current_view_id_);
     }
+    static int once = 0;
+    if (once < 3) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[present#%d] draws=%llu submits=%llu\n",
+                    once,
+                    (unsigned long long)g_total_draw_calls,
+                    (unsigned long long)g_total_submits);
+            fflush(f);
+        }
+    }
     silent_storm::renderer::end_frame();
     scene_active_ = false;
     return D3D_OK;
@@ -414,6 +493,16 @@ HRESULT __stdcall D3D9Facade::BeginScene() {
     if (!scene_active_) {
         silent_storm::renderer::begin_frame();
         scene_active_ = true;
+    }
+    static int once = 0;
+    if (once < 3) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[scene#%d] BeginScene view=%u draw_total=%llu\n",
+                    once, current_view_id_,
+                    (unsigned long long)g_total_draw_calls);
+            fflush(f);
+        }
     }
     return D3D_OK;
 }
@@ -847,6 +936,7 @@ void apply_transform_matrix(const DeviceState& s) {
 
 HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
                                              UINT StartVertex, UINT PrimitiveCount) {
+    trace_draw_entry("DrawPrimitive");
     auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
     if (!vb || stream_stride_[0] == 0) return D3D_OK;
 
@@ -884,8 +974,8 @@ HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
 
     const char* arch = state_.select_shader_archetype();
     bgfx::ProgramHandle prog = get_program(arch);
-    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
-    else bgfx::discard();
+    if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
+    else { trace_invalid_prog(arch); bgfx::discard(); }
     return D3D_OK;
 }
 
@@ -893,6 +983,7 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
                                                     INT BaseVertexIndex, UINT MinVertexIndex,
                                                     UINT NumVertices, UINT startIndex,
                                                     UINT primCount) {
+    trace_draw_entry("DrawIndexedPrimitive");
     auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
     auto* ib = static_cast<FacadeIndexBuffer*>(ibo_);
     if (!vb || !ib || stream_stride_[0] == 0) return D3D_OK;
@@ -933,8 +1024,8 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
 
     const char* arch = state_.select_shader_archetype();
     bgfx::ProgramHandle prog = get_program(arch);
-    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
-    else bgfx::discard();
+    if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
+    else { trace_invalid_prog(arch); bgfx::discard(); }
     return D3D_OK;
 }
 
@@ -942,6 +1033,7 @@ HRESULT __stdcall D3D9Facade::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
                                                UINT PrimitiveCount,
                                                CONST void* pVertexStreamZeroData,
                                                UINT VertexStreamZeroStride) {
+    trace_draw_entry("DrawPrimitiveUP");
     if (!pVertexStreamZeroData || VertexStreamZeroStride == 0) return D3D_OK;
     UINT verts = PrimitiveCount * verts_per_prim(PrimitiveType);
     auto layout = make_layout_from_fvf(fvf_, VertexStreamZeroStride);
@@ -967,8 +1059,8 @@ HRESULT __stdcall D3D9Facade::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
 
     const char* arch = state_.select_shader_archetype();
     bgfx::ProgramHandle prog = get_program(arch);
-    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
-    else bgfx::discard();
+    if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
+    else { trace_invalid_prog(arch); bgfx::discard(); }
     return D3D_OK;
 }
 
@@ -979,6 +1071,7 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveT
                                                       D3DFORMAT IndexDataFormat,
                                                       CONST void* pVertexStreamZeroData,
                                                       UINT VertexStreamZeroStride) {
+    trace_draw_entry("DrawIndexedPrimitiveUP");
     if (!pVertexStreamZeroData || !pIndexData || VertexStreamZeroStride == 0) return D3D_OK;
     UINT total_verts = MinVertexIndex + NumVertices;
     UINT num_indices = PrimitiveCount * verts_per_prim(PrimitiveType);
@@ -1014,8 +1107,8 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveT
 
     const char* arch = state_.select_shader_archetype();
     bgfx::ProgramHandle prog = get_program(arch);
-    if (bgfx::isValid(prog)) bgfx::submit(current_view_id_, prog);
-    else bgfx::discard();
+    if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
+    else { trace_invalid_prog(arch); bgfx::discard(); }
     return D3D_OK;
 }
 
