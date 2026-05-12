@@ -26,6 +26,12 @@
 #include <vector>
 
 extern "C" int PortFillAllRecordsFromStorage();
+// r49: post-fill back-population of CRndPtr<T>::variants and inverse vector
+// relations (CTemplVariant::rects, ::pFinalElements, ::pUnits, etc.). The
+// upstream Import() implementations did this via PushItem(&parent->vec,this)
+// after ImportField filled the back-ref ptr. Our dbfill bypasses Import(),
+// so we replay the back-population here in one sweep.
+extern "C" int PortBackPopulateVariants();
 
 namespace {
 
@@ -378,4 +384,286 @@ extern "C" int PortFillAllRecordsFromStorage()
         fclose(log);
     }
     return totalWritten;
+}
+
+namespace {
+// r49: helper — push p into pVec only if not already present. Matches the
+// upstream PushItem(...) semantics from DBFormat/DataMap.cpp:29.
+template <typename T>
+static bool PushItemUnique(std::vector< CPtr<T> >* pVec, T* p)
+{
+    if (!pVec || !p) return false;
+    for (size_t i = 0; i < pVec->size(); ++i) {
+        if (pVec->operator[](i).GetPtr() == p) return false;
+    }
+    pVec->push_back(CPtr<T>(p));
+    return true;
+}
+
+// r49: iterate every record in a table, and for each `variant` whose back-ref
+// pointer (member-of-pointer-to-parent) is non-null, push it into the parent's
+// vector and (optionally) add an equal-weight sector to the parent's roulette.
+//
+// Implemented as a non-template helper per (Variant,Parent,member) triple,
+// done inline below where types are known.
+} // anonymous namespace
+
+extern "C" int PortBackPopulateVariants()
+{
+    FILE* log = 0;
+    fopen_s(&log, "silent_storm_r49_backpop.log", "w");
+    if (log) {
+        fprintf(log, "r49 backpop: starting reverse-population of CRndPtr vectors\n");
+    }
+
+    int nTemplVar = 0;
+    int nRect = 0;
+    int nFinalEl = 0;
+    int nUnit = 0;
+    int nMaterial = 0;
+    int nRndModel = 0;
+    int nEffect = 0;
+    int nAmbLight = 0;
+    int nSound = 0;
+    int nRndObj = 0;
+    int nRndCP = 0;
+    int nExplosion = 0;
+    int nTerrSpot = 0;
+    int nWaypoint = 0;
+
+    // === CTemplVariant -> CTemplate::variants =========================
+    if ( NDb::CTemplate * /*unused*/ probe = (NDb::CTemplate*)0 )
+    {
+        (void)probe; // silence
+    }
+    {
+        CDBTable<NDb::CTemplVariant>* pT = NDatabase::GetTable<NDb::CTemplVariant>();
+        if (pT) {
+            CDBIterator<NDb::CTemplVariant> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CTemplVariant* pV = it.Get();
+                if (!pV) continue;
+                NDb::CTemplate* pParent = pV->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CTemplVariant>(&pParent->variants, pV)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nTemplVar;
+                }
+            }
+        }
+    }
+
+    // === CRectangle -> CTemplVariant::rects ===========================
+    {
+        CDBTable<NDb::CRectangle>* pT = NDatabase::GetTable<NDb::CRectangle>();
+        if (pT) {
+            CDBIterator<NDb::CRectangle> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CRectangle* pR = it.Get();
+                if (!pR) continue;
+                NDb::CTemplVariant* pParent = pR->pVariant.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CRectangle>(&pParent->rects, pR)) ++nRect;
+            }
+        }
+    }
+
+    // === CFinalElement -> CTemplVariant::pFinalElements ==============
+    {
+        CDBTable<NDb::CFinalElement>* pT = NDatabase::GetTable<NDb::CFinalElement>();
+        if (pT) {
+            CDBIterator<NDb::CFinalElement> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CFinalElement* pE = it.Get();
+                if (!pE) continue;
+                NDb::CTemplVariant* pParent = pE->pVariant.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CFinalElement>(&pParent->pFinalElements, pE)) ++nFinalEl;
+            }
+        }
+    }
+
+    // === CUnit -> CTemplVariant::pUnits ==============================
+    {
+        CDBTable<NDb::CUnit>* pT = NDatabase::GetTable<NDb::CUnit>();
+        if (pT) {
+            CDBIterator<NDb::CUnit> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CUnit* pU = it.Get();
+                if (!pU) continue;
+                NDb::CTemplVariant* pParent = pU->pVariant.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CUnit>(&pParent->pUnits, pU)) ++nUnit;
+            }
+        }
+    }
+
+    // === CMaterial -> CTMaterial::variants ===========================
+    {
+        CDBTable<NDb::CMaterial>* pT = NDatabase::GetTable<NDb::CMaterial>();
+        if (pT) {
+            CDBIterator<NDb::CMaterial> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CMaterial* pM = it.Get();
+                if (!pM) continue;
+                NDb::CTMaterial* pParent = pM->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CMaterial>(&pParent->variants, pM)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nMaterial;
+                }
+            }
+        }
+    }
+
+    // === CRndModel -> CTRndModel::variants ===========================
+    // r49 NOTE: CRndModel is defined in DataFormat.cpp's NDb namespace —
+    // forward-decl-only in the public header. Cannot dereference its members
+    // from this TU. Skipped; if needed for terrain rendering, move the class
+    // definition into DataFormat.h or stage a second TU compiled inside the
+    // DBFormat directory.
+
+    // === CEffect -> CTEffect::variants ===============================
+    {
+        CDBTable<NDb::CEffect>* pT = NDatabase::GetTable<NDb::CEffect>();
+        if (pT) {
+            CDBIterator<NDb::CEffect> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CEffect* pE = it.Get();
+                if (!pE) continue;
+                NDb::CTEffect* pParent = pE->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CEffect>(&pParent->variants, pE)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nEffect;
+                }
+            }
+        }
+    }
+
+    // === CAmbientLight -> CTAmbientLight::variants ===================
+    {
+        CDBTable<NDb::CAmbientLight>* pT = NDatabase::GetTable<NDb::CAmbientLight>();
+        if (pT) {
+            CDBIterator<NDb::CAmbientLight> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CAmbientLight* pL = it.Get();
+                if (!pL) continue;
+                NDb::CTAmbientLight* pParent = pL->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CAmbientLight>(&pParent->variants, pL)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nAmbLight;
+                }
+            }
+        }
+    }
+
+    // === CSoundVariant -> CTSound::variants ==========================
+    {
+        CDBTable<NDb::CSoundVariant>* pT = NDatabase::GetTable<NDb::CSoundVariant>();
+        if (pT) {
+            CDBIterator<NDb::CSoundVariant> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CSoundVariant* pS = it.Get();
+                if (!pS) continue;
+                NDb::CTSound* pParent = pS->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CSoundVariant>(&pParent->variants, pS)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nSound;
+                }
+            }
+        }
+    }
+
+    // === CRndObject -> CTRndObject::variants =========================
+    {
+        CDBTable<NDb::CRndObject>* pT = NDatabase::GetTable<NDb::CRndObject>();
+        if (pT) {
+            CDBIterator<NDb::CRndObject> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CRndObject* pO = it.Get();
+                if (!pO) continue;
+                NDb::CTRndObject* pParent = pO->pTemplate.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CRndObject>(&pParent->variants, pO)) {
+                    pParent->roulette.AddSector(1.0f);
+                    ++nRndObj;
+                }
+            }
+        }
+    }
+
+    // === CRndConstructionPart -> CTConstructionPart::variants ========
+    // r49 NOTE: same as CRndModel — defined inline in DataFormat.cpp's NDb
+    // namespace; not visible here. Skipped.
+
+    // === CExplosion -> CTemplVariant::explosions =====================
+    {
+        CDBTable<NDb::CExplosion>* pT = NDatabase::GetTable<NDb::CExplosion>();
+        if (pT) {
+            CDBIterator<NDb::CExplosion> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CExplosion* pE = it.Get();
+                if (!pE) continue;
+                NDb::CTemplVariant* pParent = pE->pVariant.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CExplosion>(&pParent->explosions, pE)) ++nExplosion;
+            }
+        }
+    }
+
+    // === CRndTerrainSpot -> CTemplVariant::terrainSpots ==============
+    {
+        CDBTable<NDb::CRndTerrainSpot>* pT = NDatabase::GetTable<NDb::CRndTerrainSpot>();
+        if (pT) {
+            CDBIterator<NDb::CRndTerrainSpot> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CRndTerrainSpot* pS = it.Get();
+                if (!pS) continue;
+                NDb::CTemplVariant* pParent = pS->pVar.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CRndTerrainSpot>(&pParent->terrainSpots, pS)) ++nTerrSpot;
+            }
+        }
+    }
+
+    // === CWaypoint -> CTemplVariant::waypoints =======================
+    {
+        CDBTable<NDb::CWaypoint>* pT = NDatabase::GetTable<NDb::CWaypoint>();
+        if (pT) {
+            CDBIterator<NDb::CWaypoint> it(*pT);
+            while (it.MoveNext()) {
+                NDb::CWaypoint* pW = it.Get();
+                if (!pW) continue;
+                NDb::CTemplVariant* pParent = pW->pVar.GetPtr();
+                if (!pParent) continue;
+                if (PushItemUnique<NDb::CWaypoint>(&pParent->waypoints, pW)) ++nWaypoint;
+            }
+        }
+    }
+
+    int nTotal = nTemplVar + nRect + nFinalEl + nUnit + nMaterial + nRndModel + nEffect +
+                 nAmbLight + nSound + nRndObj + nRndCP + nExplosion + nTerrSpot + nWaypoint;
+
+    if (log) {
+        fprintf(log, "r49 backpop:  CTemplVariant->CTemplate::variants            = %d\n", nTemplVar);
+        fprintf(log, "r49 backpop:  CRectangle->CTemplVariant::rects              = %d\n", nRect);
+        fprintf(log, "r49 backpop:  CFinalElement->CTemplVariant::pFinalElements  = %d\n", nFinalEl);
+        fprintf(log, "r49 backpop:  CUnit->CTemplVariant::pUnits                  = %d\n", nUnit);
+        fprintf(log, "r49 backpop:  CMaterial->CTMaterial::variants               = %d\n", nMaterial);
+        fprintf(log, "r49 backpop:  CRndModel->CTRndModel::variants               = %d\n", nRndModel);
+        fprintf(log, "r49 backpop:  CEffect->CTEffect::variants                   = %d\n", nEffect);
+        fprintf(log, "r49 backpop:  CAmbientLight->CTAmbientLight::variants       = %d\n", nAmbLight);
+        fprintf(log, "r49 backpop:  CSoundVariant->CTSound::variants              = %d\n", nSound);
+        fprintf(log, "r49 backpop:  CRndObject->CTRndObject::variants             = %d\n", nRndObj);
+        fprintf(log, "r49 backpop:  CRndConstructionPart->CTConstructionPart::v   = %d\n", nRndCP);
+        fprintf(log, "r49 backpop:  CExplosion->CTemplVariant::explosions         = %d\n", nExplosion);
+        fprintf(log, "r49 backpop:  CRndTerrainSpot->CTemplVariant::terrainSpots  = %d\n", nTerrSpot);
+        fprintf(log, "r49 backpop:  CWaypoint->CTemplVariant::waypoints           = %d\n", nWaypoint);
+        fprintf(log, "r49 backpop:  TOTAL                                         = %d\n", nTotal);
+        fclose(log);
+    }
+    return nTotal;
 }

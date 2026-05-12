@@ -55,6 +55,7 @@ using namespace std;
 // at the tail of PromoteRecordsFromStorage() after the IDs-only basic
 // promote has materialized empty CDBRecord instances in each table.
 extern "C" int PortFillAllRecordsFromStorage();
+extern "C" int PortBackPopulateVariants();
 // silent-storm-port r21: r20's std::list path was a dead end; r21 finds via
 // Ghidra-RE of shipping CDBTableBase::op& (FUN_00449A10) that storage is on
 // CDBTableBase itself (CObj<CDBTableDataStorage> m_storage). PromoteRecords
@@ -339,11 +340,15 @@ static void PromoteRecordsFromStorage()
     // in each table's records hash, hand off to dbfill.cpp which has access
     // to NDb::* class definitions and can write fields by offsetof().
     int nFilled = PortFillAllRecordsFromStorage();
+    // r49: after scalar/ref field-fill, walk variant tables and back-push
+    // each entry into its parent's variants/rects/pUnits/etc. vector. This
+    // restores the relations that upstream's Import() did via PushItem.
+    int nBackPop = PortBackPopulateVariants();
     FILE* fp = NULL; fopen_s(&fp, "silent_storm_r29_promote.log", "w");
     if (fp) {
         fprintf(fp, "r29: promoted %d records (IDs) across %d/%d tables; "
-                    "schema-fill wrote %d fields\n",
-                nPromoted, nMatched, nTotalTables, nFilled);
+                    "schema-fill wrote %d fields; r49 back-pop pushed %d\n",
+                nPromoted, nMatched, nTotalTables, nFilled, nBackPop);
         fclose(fp);
     }
 }
