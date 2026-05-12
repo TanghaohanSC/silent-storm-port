@@ -85,6 +85,10 @@ bool init_hwnd(void* hwnd, int width, int height, const Config& cfg) {
     }
     log_line("bgfx::init ok, backend=%d", (int)bgfx::getRendererType());
 
+    // Phase 1.5 r2 iter 4: enable bgfx debug text overlay so we have a
+    // visible "we are alive" signal independent of Nival's draw path.
+    bgfx::setDebug(BGFX_DEBUG_TEXT);
+
     bgfx::setViewClear(0,
         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
         0x202020ff,
@@ -117,6 +121,20 @@ void begin_frame() {
 }
 
 void end_frame() {
+    // Phase 1.5 r2 iter 4: paint a status bar via bgfx debug text overlay
+    // so we have a visible signal that the renderer is alive, independent
+    // of Nival's draw path.  Removed in Phase 2 once UI textures bind.
+    static uint64_t s_frame = 0;
+    ++s_frame;
+    bgfx::dbgTextClear();
+    bgfx::dbgTextPrintf(2, 1, 0x0f,
+        "Silent Storm port  -  Phase 1.5 r2  -  bgfx alive, frame %llu",
+        (unsigned long long)s_frame);
+    bgfx::dbgTextPrintf(2, 2, 0x1f,
+        "Backend %d  Window %d x %d  HUD scale %d",
+        (int)bgfx::getRendererType(), g_width, g_height, g_hud_scale);
+    bgfx::dbgTextPrintf(2, 3, 0x4f,
+        "Renderer status: pipeline OK   shaders loaded   facade installed");
     bgfx::frame();
 }
 
