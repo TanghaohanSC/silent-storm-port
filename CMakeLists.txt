@@ -37,6 +37,7 @@ add_subdirectory(third_party/bgfx EXCLUDE_FROM_ALL)
 add_subdirectory(src/stubs)
 add_subdirectory(src/config)
 add_subdirectory(src/platform)
+add_subdirectory(src/renderer)
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.
 # Start with the leaf vendored libs (zlib, libpng) — no PCH, pure C,
@@ -75,6 +76,7 @@ target_link_libraries(jan03_Image PUBLIC jan03::Misc jan03::zlib jan03::libpng)
 target_include_directories(jan03_Image PRIVATE ${CMAKE_SOURCE_DIR}/src/stubs/s3tc_shim)  # proprietary S3TC SDK stub
 target_link_libraries(jan03_FModSound PUBLIC jan03::Misc silent_storm_fmod_stub)
 target_link_libraries(jan03_Input PUBLIC jan03::Misc)
+target_compile_definitions(jan03_Input PRIVATE SS_USE_SDL_INPUT)
 target_link_libraries(jan03_Script PUBLIC jan03::Misc jan03::MemoryMngr)
 target_link_libraries(jan03_OpenDynamix PUBLIC jan03::Misc)
 target_link_libraries(jan03_MiscDll PUBLIC jan03::Misc)
@@ -138,6 +140,7 @@ endif()
 target_link_libraries(silent_storm PRIVATE
     legacy::stlport
     jan03::Main
+    silent_storm::renderer
     silent_storm::platform
     silent_storm_stubs
     silent_storm_fmod_stub

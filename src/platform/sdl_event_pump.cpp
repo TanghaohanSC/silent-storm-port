@@ -1,4 +1,5 @@
 #include "sdl_event_pump.h"
+#include "sdl_input_bridge.h"
 #include <SDL3/SDL.h>
 
 namespace silent_storm::platform {
@@ -15,7 +16,7 @@ PumpResult pump_events() {
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
             case SDL_EVENT_MOUSE_WHEEL:
-                // Task 4 hooks input forwarding here.
+                forward_to_ninput(ev);
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
                 // Task 5 hooks bgfx::reset() here.
