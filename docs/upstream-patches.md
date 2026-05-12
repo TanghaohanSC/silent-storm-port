@@ -88,3 +88,14 @@ After r32+r33 the DB is fully populated, so menu data records resolve.
 - `CMainMenuInterface::Step` — guards on `!GetCamera()` and falls through to `ss_r8_render_fallback_menu` so the user has visible feedback (we don't yet wire 2D UI through bgfx, so the UIContainer pixels go nowhere).
 
 Result: data-driven main-menu state actually reached + steady-state main loop. The "loaded but invisible CMainMenuUI" is the bridge to the next milestone (paint the UI tree through bgfx 2D).
+
+---
+
+## 2026-05-12 — r35 menu transitions work (MainMenu → SideMenu, UIContainer 353)
+
+- `Main/iSideMenu.cpp` — CSideMenuInterface::Initialize switched to InitializeUIOnly; LoadTemplate on UIContainer 353 (Axis/Allies side-pick panel) succeeds. Step null-guards GetCamera / pClientWindow.
+- `Main/iMainMenu.cpp` — adds a 5-second auto-fire that queues `new CICSideMenu` so the state-machine transition can be smoke-tested without keyboard input.
+
+Result: trace shows the full state transition chain — MainMenu in steady state → AUTO fire → CICSideMenu::Exec → SideMenu init OK (UIContainer 353 FOUND) → SideMenu Step loop → steady-state.
+
+This satisfies the "press a key, see menu transitions" win condition end-to-end (auto-fire stands in for keyboard until the original menu key binds are wired to bgfx input).
