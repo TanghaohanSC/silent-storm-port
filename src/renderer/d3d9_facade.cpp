@@ -90,6 +90,42 @@ void trace_invalid_prog(const char* arch) {
         }
     }
 }
+
+// r61: detailed reason counters for early returns in draw paths
+struct DrawReasonCounts {
+    uint64_t no_vb        = 0;  // stream_vbo_[0] == nullptr
+    uint64_t no_ib        = 0;  // ibo_ == nullptr
+    uint64_t no_stride    = 0;  // stream_stride_[0] == 0
+    uint64_t no_tvb_space = 0;  // bgfx avail < verts
+    uint64_t no_tib_space = 0;
+    uint64_t empty_cpu_vb = 0;  // vb cpu_size == 0
+    uint64_t submitted    = 0;
+    uint64_t real_data    = 0;  // submissions with real VB data copy
+} g_reasons;
+
+void trace_reason(const char* tag, uint64_t* counter) {
+    ++*counter;
+    if (*counter <= 4 || (*counter & (*counter - 1)) == 0) {
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[reason] %s now=%llu\n", tag, (unsigned long long)*counter);
+            fflush(f);
+        }
+    }
+}
+
+void trace_dip_args(UINT NumVertices, UINT startIndex, UINT primCount,
+                    UINT stride, DWORD fvf, UINT vb_cpu_size, UINT ib_cpu_size) {
+    static int once = 0;
+    if (once < 24) {
+        ++once;
+        if (FILE* f = draw_log()) {
+            fprintf(f, "[dip_args#%d] NumV=%u sIdx=%u primCount=%u stride=%u fvf=%x vb_cpu=%u ib_cpu=%u\n",
+                    once, NumVertices, startIndex, primCount, stride,
+                    (unsigned)fvf, vb_cpu_size, ib_cpu_size);
+            fflush(f);
+        }
+    }
+}
 } // namespace
 
 IDirect3DDevice9* facade_instance() {
@@ -306,13 +342,25 @@ HRESULT __stdcall D3D9Facade::Present(CONST RECT* /*pSourceRect*/, CONST RECT* /
         bgfx::touch(current_view_id_);
     }
     static int once = 0;
-    if (once < 3) {
+    static uint64_t last_dump = 0;
+    if (once < 3 || (g_total_draw_calls - last_dump) > 5000) {
         ++once;
+        last_dump = g_total_draw_calls;
         if (FILE* f = draw_log()) {
-            fprintf(f, "[present#%d] draws=%llu submits=%llu\n",
+            fprintf(f, "[present#%d] draws=%llu submits=%llu real=%llu  "
+                       "no_vb=%llu no_ib=%llu no_stride=%llu empty_cpu=%llu "
+                       "no_tvb=%llu no_tib=%llu submitted=%llu\n",
                     once,
                     (unsigned long long)g_total_draw_calls,
-                    (unsigned long long)g_total_submits);
+                    (unsigned long long)g_total_submits,
+                    (unsigned long long)g_reasons.real_data,
+                    (unsigned long long)g_reasons.no_vb,
+                    (unsigned long long)g_reasons.no_ib,
+                    (unsigned long long)g_reasons.no_stride,
+                    (unsigned long long)g_reasons.empty_cpu_vb,
+                    (unsigned long long)g_reasons.no_tvb_space,
+                    (unsigned long long)g_reasons.no_tib_space,
+                    (unsigned long long)g_reasons.submitted);
             fflush(f);
         }
     }
@@ -992,25 +1040,42 @@ HRESULT __stdcall D3D9Facade::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,
                                              UINT StartVertex, UINT PrimitiveCount) {
     trace_draw_entry("DrawPrimitive");
     auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
-    if (!vb || stream_stride_[0] == 0) return D3D_OK;
+    if (!vb) { trace_reason("DP.no_vb", &g_reasons.no_vb); return D3D_OK; }
+    if (stream_stride_[0] == 0) { trace_reason("DP.no_stride", &g_reasons.no_stride); return D3D_OK; }
 
-    // Materialize a transient VB from the CPU-side data (we don't keep a
-    // long-lived bgfx VB for now — the buffer's content may have changed via
-    // Lock/Unlock since last draw).
-    // Allocate enough room for the StartVertex+count slice we need.
     UINT verts = PrimitiveCount * verts_per_prim(PrimitiveType);
     UINT stride = stream_stride_[0];
-    UINT data_size = (StartVertex + verts) * stride;
-    // (For Phase 1 we trust the caller's pointer arithmetic).
+    UINT vb_cpu_size = vb->cpu_size();
+    if (vb_cpu_size == 0) { trace_reason("DP.empty_cpu_vb", &g_reasons.empty_cpu_vb); return D3D_OK; }
+
     auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
-    if (bgfx::getAvailTransientVertexBuffer(verts, layout) < verts) return D3D_OK;
+    const uint16_t layout_stride = layout.getStride();
+
+    // Clamp by what cpu_buf can supply.
+    UINT max_verts = vb_cpu_size / stride;
+    if (StartVertex >= max_verts) return D3D_OK;
+    if (StartVertex + verts > max_verts) verts = max_verts - StartVertex;
+    if (verts == 0) return D3D_OK;
+
+    if (bgfx::getAvailTransientVertexBuffer(verts, layout) < verts) {
+        trace_reason("DP.no_tvb_space", &g_reasons.no_tvb_space);
+        return D3D_OK;
+    }
     bgfx::TransientVertexBuffer tvb;
     bgfx::allocTransientVertexBuffer(&tvb, verts, layout);
-    // Best effort — copy `verts * stride` bytes from CPU buf.
-    // (vb's cpu_buf_ is private; we use Lock/Unlock semantics here.  For now,
-    // produce an empty buffer if the layout-derived stride doesn't match.)
-    (void)data_size;
-    std::memset(tvb.data, 0, tvb.size);
+
+    // r61: real-data copy from VB cpu_buf_ — was previously memset zero.
+    const uint8_t* src = vb->cpu_data() + StartVertex * stride;
+    if (stride == layout_stride) {
+        std::memcpy(tvb.data, src, std::min<UINT>(verts * stride, tvb.size));
+    } else {
+        UINT per_vert = stride < layout_stride ? stride : layout_stride;
+        for (UINT v = 0; v < verts; ++v) {
+            if ((v + 1) * layout_stride > tvb.size) break;
+            std::memcpy(tvb.data + v * layout_stride, src + v * stride, per_vert);
+        }
+    }
+    ++g_reasons.real_data;
 
     apply_transform_matrix(state_);
     bgfx::setState(state_.build_bgfx_state());
@@ -1040,22 +1105,59 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
     trace_draw_entry("DrawIndexedPrimitive");
     auto* vb = static_cast<FacadeVertexBuffer*>(stream_vbo_[0]);
     auto* ib = static_cast<FacadeIndexBuffer*>(ibo_);
-    if (!vb || !ib || stream_stride_[0] == 0) return D3D_OK;
+    if (!vb) { trace_reason("DIP.no_vb", &g_reasons.no_vb); return D3D_OK; }
+    if (!ib) { trace_reason("DIP.no_ib", &g_reasons.no_ib); return D3D_OK; }
+    if (stream_stride_[0] == 0) { trace_reason("DIP.no_stride", &g_reasons.no_stride); return D3D_OK; }
 
     UINT stride = stream_stride_[0];
-    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    UINT vb_cpu_size = vb->cpu_size();
+    UINT ib_cpu_size = ib->cpu_size();
+    trace_dip_args(NumVertices, startIndex, primCount, stride, vb->fvf | fvf_,
+                   vb_cpu_size, ib_cpu_size);
 
-    // For Phase 1 we always submit a transient vertex buffer copied from the
-    // VB's CPU buffer.  This is wasteful (one alloc per draw) but works without
-    // needing a long-lived bgfx handle on the VB.  T9.5 will switch to a
-    // persistent dynamic vertex buffer keyed on (vbo, layout).
+    if (vb_cpu_size == 0) { trace_reason("DIP.empty_cpu_vb", &g_reasons.empty_cpu_vb); return D3D_OK; }
+
+    auto layout = make_layout_from_fvf(vb->fvf | fvf_, stride);
+    const uint16_t layout_stride = layout.getStride();
+
+    UINT num_indices = primCount * verts_per_prim(PrimitiveType);
     UINT total_verts = MinVertexIndex + NumVertices;
+    // Clamp to what CPU buffer can supply (avoid OOB read on tvb fill).
+    UINT max_verts_from_cpu = vb_cpu_size / stride;
+    if (total_verts > max_verts_from_cpu) total_verts = max_verts_from_cpu;
+    if (total_verts == 0) return D3D_OK;
+
     if (bgfx::getAvailTransientVertexBuffer(total_verts, layout) < total_verts) {
+        trace_reason("DIP.no_tvb_space", &g_reasons.no_tvb_space);
         return D3D_OK;
     }
     bgfx::TransientVertexBuffer tvb;
     bgfx::allocTransientVertexBuffer(&tvb, total_verts, layout);
-    std::memset(tvb.data, 0, tvb.size);
+
+    // r61: actually copy real vertex data from VB CPU buffer.
+    // D3D9 layout's stride may differ from bgfx layout's stride (we don't
+    // currently mirror declarations 1:1).  Best-effort: if strides match, do
+    // one big memcpy; else copy per-vertex the min(d3d_stride, layout_stride)
+    // bytes so at least the position field is correct (always the first attr).
+    const uint8_t* src = vb->cpu_data();
+    UINT copy_bytes = static_cast<UINT>(total_verts) * stride;
+    if (copy_bytes > vb_cpu_size) copy_bytes = vb_cpu_size;
+    if (stride == layout_stride) {
+        // Strides match — clean bulk copy.
+        std::memcpy(tvb.data, src, std::min<UINT>(copy_bytes, tvb.size));
+    } else {
+        // Per-vertex copy of the lesser stride so position (first attr) lands.
+        UINT per_vert = stride < layout_stride ? stride : layout_stride;
+        UINT vbytes = tvb.size;
+        UINT pos = 0;
+        uint8_t* dst = tvb.data;
+        for (UINT v = 0; v < total_verts && pos + layout_stride <= vbytes &&
+                         (v + 1) * stride <= copy_bytes; ++v) {
+            std::memcpy(dst + v * layout_stride, src + v * stride, per_vert);
+            pos += layout_stride;
+        }
+    }
+    ++g_reasons.real_data;
 
     apply_transform_matrix(state_);
     bgfx::setState(state_.build_bgfx_state());
@@ -1070,15 +1172,47 @@ HRESULT __stdcall D3D9Facade::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveTyp
         }
     }
     bgfx::setVertexBuffer(0, &tvb, /*offset*/ 0, /*numVertices*/ total_verts);
+
+    // Index buffer — prefer the bgfx-resident handle if Unlock created one,
+    // else build a transient IB from cpu_buf so we still draw something.
     if (bgfx::isValid(ib->handle)) {
-        UINT num_indices = primCount * verts_per_prim(PrimitiveType);
         bgfx::setIndexBuffer(ib->handle, startIndex, num_indices);
+    } else if (ib_cpu_size > 0) {
+        bool is32 = ib->is32();
+        UINT idx_bytes = is32 ? 4u : 2u;
+        UINT max_indices_from_cpu = ib_cpu_size / idx_bytes;
+        UINT use_indices = num_indices;
+        if (startIndex + use_indices > max_indices_from_cpu) {
+            if (startIndex >= max_indices_from_cpu) {
+                trace_reason("DIP.no_tib_space", &g_reasons.no_tib_space);
+                bgfx::discard();
+                return D3D_OK;
+            }
+            use_indices = max_indices_from_cpu - startIndex;
+        }
+        if (bgfx::getAvailTransientIndexBuffer(use_indices, is32) < use_indices) {
+            trace_reason("DIP.no_tib_space", &g_reasons.no_tib_space);
+            bgfx::discard();
+            return D3D_OK;
+        }
+        bgfx::TransientIndexBuffer tib;
+        bgfx::allocTransientIndexBuffer(&tib, use_indices, is32);
+        std::memcpy(tib.data, ib->cpu_data() + startIndex * idx_bytes,
+                    use_indices * idx_bytes);
+        bgfx::setIndexBuffer(&tib, 0, use_indices);
+    } else {
+        bgfx::discard();
+        return D3D_OK;
     }
     (void)BaseVertexIndex;
 
     const char* arch = state_.select_shader_archetype();
     bgfx::ProgramHandle prog = get_program(arch);
-    if (bgfx::isValid(prog)) { trace_submit(arch, prog); bgfx::submit(current_view_id_, prog); }
+    if (bgfx::isValid(prog)) {
+        trace_submit(arch, prog);
+        ++g_reasons.submitted;
+        bgfx::submit(current_view_id_, prog);
+    }
     else { trace_invalid_prog(arch); bgfx::discard(); }
     return D3D_OK;
 }

@@ -110,6 +110,10 @@ public:
     DWORD     usage_ = 0;
     D3DPOOL   pool_  = D3DPOOL_DEFAULT;
 
+    // r61: facade DrawIndexedPrimitive reads CPU bytes to fill transient VB.
+    const uint8_t* cpu_data() const { return cpu_buf_.data(); }
+    UINT           cpu_size() const { return static_cast<UINT>(cpu_buf_.size()); }
+
 private:
     ULONG     ref_count_ = 1;
     DWORD     priority_  = 0;
@@ -147,6 +151,11 @@ public:
     D3DFORMAT format = D3DFMT_INDEX16;
     DWORD     usage_ = 0;
     D3DPOOL   pool_  = D3DPOOL_DEFAULT;
+
+    // r61: facade DrawIndexedPrimitive reads CPU bytes to fill transient IB.
+    const uint8_t* cpu_data() const { return cpu_buf_.data(); }
+    UINT           cpu_size() const { return static_cast<UINT>(cpu_buf_.size()); }
+    bool           is32() const     { return format == D3DFMT_INDEX32; }
 
 private:
     ULONG     ref_count_ = 1;
