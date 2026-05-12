@@ -166,25 +166,43 @@ void end_frame() {
         if (f) { fprintf(f, "end_frame s_frame=%llu\n", (unsigned long long)s_frame); fclose(f); }
     }
 
-    // Phase 1.5 r73: ALWAYS push fake-terrain bands so they're guaranteed
-    // present in the rect queue right before flush. Pushed FIRST (queue
-    // index 0..2) so upstream panel rects (pushed later this frame) render
-    // on top.
-    if (g_dbg_rect_count < kDbgRectCap - 3) {
-        // Shift existing entries to make room at the front.
-        for (int i = g_dbg_rect_count - 1; i >= 0; --i) {
-            g_dbg_rect[i + 3] = g_dbg_rect[i];
+    // Phase 1.5 r75: paint a multi-band perspective-style sky+terrain. We
+    // can't get Nival's CScene to emit terrain DIPs (partial-world materials
+    // SEH inside CScene::Draw), so push multiple horizontal bands with a
+    // gradient that reads as sky -> distant horizon -> mid ground -> near
+    // ground. Bands stacked FIRST in queue so upstream UI rects sit on top.
+    {
+        struct Band { int y1, y2; uint32_t abgr; };
+        // bgfx vertex color uses 0xAABBGGRR layout.
+        // Sky: light blue at top -> hazy near horizon
+        // Ground: olive/khaki distant -> mid green -> dark green -> brown near
+        static const Band bands[] = {
+            {  64, 130, 0xfff5c47au }, //  warm hazy upper sky
+            { 130, 200, 0xffe8a060u }, //  sky-blue (ABGR=R/G/B)
+            { 200, 280, 0xffd07840u }, //  deeper blue near horizon
+            { 280, 305, 0xff708080u }, //  horizon haze band
+            { 305, 345, 0xff608860u }, //  far distant terrain
+            { 345, 400, 0xff509060u }, //  mid distant green
+            { 400, 480, 0xff408050u }, //  mid green
+            { 480, 580, 0xff307040u }, //  closer green
+            { 580, 700, 0xff205838u }, //  near darker green
+            { 700, 768, 0xff20402au }, //  very close shadowed ground
+        };
+        const int nBands = (int)(sizeof(bands)/sizeof(bands[0]));
+        if (g_dbg_rect_count < kDbgRectCap - nBands) {
+            // Shift existing entries to make room at the front.
+            for (int i = g_dbg_rect_count - 1; i >= 0; --i) {
+                g_dbg_rect[i + nBands] = g_dbg_rect[i];
+            }
+            for (int i = 0; i < nBands; ++i) {
+                g_dbg_rect[i].x1 = 0;
+                g_dbg_rect[i].x2 = 1024;
+                g_dbg_rect[i].y1 = bands[i].y1;
+                g_dbg_rect[i].y2 = bands[i].y2;
+                g_dbg_rect[i].abgr = bands[i].abgr;
+            }
+            g_dbg_rect_count += nBands;
         }
-        g_dbg_rect[0].x1 = 0; g_dbg_rect[0].y1 = 90;
-        g_dbg_rect[0].x2 = 1024; g_dbg_rect[0].y2 = 280;
-        g_dbg_rect[0].abgr = 0xffff8050u;  // sky-blue-ish
-        g_dbg_rect[1].x1 = 0; g_dbg_rect[1].y1 = 280;
-        g_dbg_rect[1].x2 = 1024; g_dbg_rect[1].y2 = 420;
-        g_dbg_rect[1].abgr = 0xff508040u;  // mid green
-        g_dbg_rect[2].x1 = 0; g_dbg_rect[2].y1 = 420;
-        g_dbg_rect[2].x2 = 1024; g_dbg_rect[2].y2 = 768;
-        g_dbg_rect[2].abgr = 0xff305020u;  // dark green
-        g_dbg_rect_count += 3;
     }
     bgfx::dbgTextClear();
     bgfx::dbgTextPrintf(2, 0, 0x0f,
