@@ -36,6 +36,7 @@ add_subdirectory(third_party/bgfx EXCLUDE_FROM_ALL)
 
 add_subdirectory(src/stubs)
 add_subdirectory(src/config)
+add_subdirectory(src/platform)
 
 # Phase 0 / Task 6: add Jan03 subprojects one batch at a time.
 # Start with the leaf vendored libs (zlib, libpng) — no PCH, pure C,
@@ -137,6 +138,7 @@ endif()
 target_link_libraries(silent_storm PRIVATE
     legacy::stlport
     jan03::Main
+    silent_storm::platform
     silent_storm_stubs
     silent_storm_fmod_stub
     silent_storm_ado_stub
