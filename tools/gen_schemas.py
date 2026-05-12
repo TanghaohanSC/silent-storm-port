@@ -1,0 +1,701 @@
+"""Static schema extractor for silent-storm DBFormat classes.
+
+Walks upstream/Soft/Andy/Jan03/a5dll/DBFormat/*.cpp, finds every
+``void <Class>::Import()`` whose body is composed solely of
+``NDatabase::ImportField( "Name", &expr )`` calls, parses the
+corresponding ``Data<X>.h`` to learn member types, and emits a single
+header ``port/src/stubs/db_record_schemas.h`` containing per-class
+``SColumnInfo`` tables suitable for compile-time ``offsetof()`` lookups.
+
+Run from the repo root or from anywhere; paths are anchored on the
+location of this script.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PORT_DIR = SCRIPT_DIR.parent
+REPO_ROOT = PORT_DIR.parent
+DBFORMAT_DIR = REPO_ROOT / "upstream" / "Soft" / "Andy" / "Jan03" / "a5dll" / "DBFormat"
+OUTPUT_PATH = PORT_DIR / "src" / "stubs" / "db_record_schemas.h"
+
+# Type codes per spec
+T_INT = 0
+T_BOOL = 1
+T_FLOAT = 2
+T_STRING = 3
+T_WSTRING = 4
+T_REF = 5
+
+# C++ leaf-type spellings → type code (used after stripping const/refs).
+PRIMITIVE_TYPE_MAP = {
+    "bool": T_BOOL,
+    "float": T_FLOAT,
+    "double": T_FLOAT,
+    "int": T_INT,
+    "unsigned": T_INT,
+    "long": T_INT,
+    "short": T_INT,
+    "DWORD": T_INT,
+    "BYTE": T_INT,
+    "WORD": T_INT,
+    "UINT": T_INT,
+    "INT": T_INT,
+    "char": T_INT,
+    "string": T_STRING,
+    "std::string": T_STRING,
+    "wstring": T_WSTRING,
+    "std::wstring": T_WSTRING,
+}
+
+# Heuristic for sub-fields where we have no parsed type info (e.g. CVec3.x
+# member resolved via offsetof on a struct we did not parse): the spec uses
+# Hungarian prefixes throughout the source, so we read the leaf name.
+SUBFIELD_NAME_HEURISTIC = [
+    (re.compile(r"^b[A-Z_]"), T_BOOL),
+    (re.compile(r"^f[A-Z_]"), T_FLOAT),
+    (re.compile(r"^pt[A-Z_]"), T_FLOAT),
+    (re.compile(r"^v[A-Z_]"), T_FLOAT),
+    (re.compile(r"^sz[A-Z_]"), T_STRING),
+    (re.compile(r"^wsz[A-Z_]"), T_WSTRING),
+    (re.compile(r"^p[A-Z_]"), T_REF),
+    (re.compile(r"^n[A-Z_]"), T_INT),
+    (re.compile(r"^dw[A-Z_]"), T_INT),
+]
+
+# Hungarian-prefix fallback for outer member when header parse missed it.
+NAME_TYPE_FALLBACK = [
+    (re.compile(r"^b[A-Z_]"), T_BOOL),
+    (re.compile(r"^f[A-Z_]"), T_FLOAT),
+    (re.compile(r"^sz[A-Z_]"), T_STRING),
+    (re.compile(r"^wsz[A-Z_]"), T_WSTRING),
+    (re.compile(r"^p[A-Z_]"), T_REF),
+    (re.compile(r"^n[A-Z_]"), T_INT),
+    (re.compile(r"^dw[A-Z_]"), T_INT),
+]
+
+
+def code_to_comment(code: int) -> str:
+    return {0: "int", 1: "bool", 2: "float", 3: "string", 4: "wstring", 5: "ref"}[code]
+
+
+# ---------------------------------------------------------------------------
+# Comment stripping (preserve newlines for line-based parsing).
+# ---------------------------------------------------------------------------
+
+
+def strip_comments(src: str) -> str:
+    out = []
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            # line comment to end of line
+            j = src.find("\n", i)
+            if j == -1:
+                break
+            i = j  # keep the \n
+        elif c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            if j == -1:
+                break
+            # Preserve newlines inside block comment so line numbers stay sane.
+            block = src[i : j + 2]
+            out.append("".join("\n" if ch == "\n" else " " for ch in block))
+            i = j + 2
+        elif c == '"':
+            # string literal — copy verbatim
+            j = i + 1
+            while j < n:
+                if src[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if src[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            out.append(src[i:j])
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Header parsing: collect {ClassName: {MemberName: TypeSpelling}} per .h.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HeaderInfo:
+    # ClassName -> { memberName -> (raw_type_spelling, type_code) }
+    classes: dict
+    # ClassName -> source header file name (basename only).
+    class_to_header: dict
+
+
+# Match a member declaration. Captures: full type, name, optional array suffix.
+# Examples:
+#   float fYaw;
+#   CPtr<CString> pText;
+#   string sParam[N_ACK_MAX_PARAM_COUNT];
+#   vector< CPtr<T> > vec;
+MEMBER_RE = re.compile(
+    r"""^\s*
+        (?P<type>
+            (?:const\s+)?
+            [A-Za-z_][\w:]*                            # base type (possibly qualified)
+            (?:\s*<[^;{}]*>)?                          # optional <...> template args
+            (?:\s*\*)?                                 # optional pointer
+        )
+        \s+
+        (?P<name>[A-Za-z_]\w*)
+        (?:\s*\[[^\]]*\])?                             # optional array
+        \s*;
+    """,
+    re.VERBOSE,
+)
+
+
+def map_type_to_code(type_spelling: str) -> int | None:
+    """Map a C++ type spelling to one of the int codes, or None if unknown."""
+    t = type_spelling.strip()
+    # Strip leading const
+    if t.startswith("const "):
+        t = t[len("const ") :].strip()
+    # Strip trailing pointer/reference markers
+    t = t.rstrip("*&").strip()
+    # CPtr<T>, CRndPtr<T>, CDBPtr<T> all behave as references for our purposes.
+    if re.match(r"^(CPtr|CRndPtr|CDBPtr|CWeakPtr)\s*<", t):
+        return T_REF
+    # vector<...>, list<...>, set<...> — treat as opaque container; skip.
+    if re.match(r"^(vector|list|set|map|deque)\s*<", t):
+        return None
+    # Strip namespaces.
+    base = t.split("<", 1)[0].strip()
+    base = base.rsplit("::", 1)[-1]
+    if base in PRIMITIVE_TYPE_MAP:
+        return PRIMITIVE_TYPE_MAP[base]
+    return None
+
+
+CLASS_HEAD_RE = re.compile(
+    r"\b(?:class|struct)\s+([A-Za-z_]\w*)\b(?:\s*:\s*(?:public|protected|private)[^\{;]*)?\s*\{",
+)
+
+
+def find_class_bodies(src: str) -> list[tuple[str, int, int]]:
+    """Return [(class_name, body_start, body_end_exclusive), ...].
+
+    body_start points to the char AFTER the opening '{'.
+    body_end_exclusive points to the matching '}' position.
+    """
+    results = []
+    for m in CLASS_HEAD_RE.finditer(src):
+        name = m.group(1)
+        open_brace = m.end() - 1
+        depth = 1
+        i = open_brace + 1
+        n = len(src)
+        while i < n and depth > 0:
+            c = src[i]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    results.append((name, open_brace + 1, i))
+                    break
+            elif c == '"':
+                # skip string
+                j = i + 1
+                while j < n and src[j] != '"':
+                    if src[j] == "\\" and j + 1 < n:
+                        j += 2
+                        continue
+                    j += 1
+                i = j
+            i += 1
+    return results
+
+
+def parse_header(path: Path) -> HeaderInfo:
+    src = path.read_text(encoding="utf-8", errors="replace")
+    src = strip_comments(src)
+    info = HeaderInfo(classes={}, class_to_header={})
+    for cls_name, body_start, body_end in find_class_bodies(src):
+        body = src[body_start:body_end]
+        # Skip nested classes' inner contents by remembering top-level only:
+        # We re-scan body excluding nested {...} blocks for member regex matches.
+        members = {}
+        # Remove nested braces so we don't pick up inline-function bodies.
+        cleaned = remove_nested_braces(body)
+        for line in cleaned.splitlines():
+            mm = MEMBER_RE.match(line)
+            if not mm:
+                continue
+            tname = re.sub(r"\s+", " ", mm.group("type")).strip()
+            mname = mm.group("name")
+            # Skip obvious non-members (typedef, using, friend, etc. already
+            # filtered by regex). Also reject all-caps macro-ish lines.
+            if tname in {"return", "case", "default"}:
+                continue
+            members[mname] = tname
+        info.classes[cls_name] = members
+        info.class_to_header[cls_name] = path.name
+    return info
+
+
+def remove_nested_braces(body: str) -> str:
+    """Replace nested {...} regions with empty space to avoid matching members
+    inside inline function bodies."""
+    out = []
+    depth = 0
+    for ch in body:
+        if ch == "{":
+            depth += 1
+            out.append(" ")
+        elif ch == "}":
+            depth -= 1
+            out.append(" ")
+        else:
+            if depth > 0:
+                out.append(" " if ch != "\n" else "\n")
+            else:
+                out.append(ch)
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# .cpp parsing: find Import() bodies, extract clean ImportField calls.
+# ---------------------------------------------------------------------------
+
+IMPORT_FN_RE = re.compile(
+    r"void\s+([A-Za-z_]\w*)\s*::\s*Import\s*\(\s*\)\s*\{",
+)
+
+# REGISTER_SAVELOAD_CLASS( 0xHEX, ClassName )
+# REGISTER_SAVELOAD_CLASS_NM( 0xHEX, ClassName, NDb )
+# Be flexible about whitespace and the optional _NM suffix.
+REGISTER_SAVELOAD_RE = re.compile(
+    r"""\bREGISTER_SAVELOAD_CLASS(?P<nm>_NM)?\s*\(\s*
+        (?P<typeid>0[xX][0-9A-Fa-f]+)\s*,\s*
+        (?P<cls>[A-Za-z_]\w*)
+        (?:\s*,\s*(?P<ns>[A-Za-z_]\w*))?
+        \s*\)
+    """,
+    re.VERBOSE,
+)
+
+# Within a single statement: NDatabase::ImportField( "Name", &expr );
+# The expression must be a single &<identifier>(.<identifier>)? — anything
+# else (cast, subscript, complex expr) disqualifies the class.
+IMPORTFIELD_STMT_RE = re.compile(
+    r"""^\s*NDatabase\s*::\s*ImportField\s*\(\s*
+        "(?P<colname>[^"\\]*)"\s*,\s*
+        &\s*(?P<outer>[A-Za-z_]\w*)
+        (?:\s*\.\s*(?P<sub>[A-Za-z_]\w*))?
+        \s*\)\s*;\s*$
+    """,
+    re.VERBOSE,
+)
+
+
+@dataclass
+class ImportCall:
+    colname: str
+    outer: str
+    sub: str | None
+
+
+@dataclass
+class ParsedImport:
+    class_name: str
+    fields: list  # list[ImportCall]
+    cpp_file: str
+    line_no: int
+
+
+@dataclass
+class SkippedImport:
+    class_name: str
+    cpp_file: str
+    line_no: int
+    reason: str
+
+
+def find_balanced_close(src: str, open_pos: int) -> int:
+    """Given index of '{', return index of matching '}'. -1 if unbalanced."""
+    depth = 0
+    i = open_pos
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        elif c == '"':
+            j = i + 1
+            while j < n:
+                if src[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if src[j] == '"':
+                    break
+                j += 1
+            i = j
+        i += 1
+    return -1
+
+
+def split_statements(body: str) -> list[str]:
+    """Split a function body into top-level statements terminated by ';'.
+    Returns trimmed statement strings (no trailing ';'). Skips empty and
+    pure-whitespace fragments. Statements that contain nested braces or
+    parentheses keep them as-is (we only split on top-level ';')."""
+    out = []
+    depth_paren = 0
+    depth_brace = 0
+    start = 0
+    n = len(body)
+    i = 0
+    while i < n:
+        c = body[i]
+        if c == "(":
+            depth_paren += 1
+        elif c == ")":
+            depth_paren -= 1
+        elif c == "{":
+            depth_brace += 1
+        elif c == "}":
+            depth_brace -= 1
+        elif c == '"':
+            j = i + 1
+            while j < n:
+                if body[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if body[j] == '"':
+                    break
+                j += 1
+            i = j
+        elif c == ";" and depth_paren == 0 and depth_brace == 0:
+            stmt = body[start : i + 1].strip()
+            if stmt:
+                out.append(stmt)
+            start = i + 1
+        i += 1
+    tail = body[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def parse_saveload_registrations(src: str) -> dict:
+    """Return {ClassName: typeID_int} for every REGISTER_SAVELOAD_CLASS(_NM)
+    match in the given (comment-stripped) source."""
+    out = {}
+    for m in REGISTER_SAVELOAD_RE.finditer(src):
+        cls = m.group("cls")
+        try:
+            tid = int(m.group("typeid"), 16)
+        except ValueError:
+            continue
+        # If a class is registered more than once (shouldn't happen), keep first.
+        out.setdefault(cls, tid)
+    return out
+
+
+def parse_cpp(path: Path):
+    """Return (parsed: list[ParsedImport], skipped: list[SkippedImport], regs: dict)."""
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    src = strip_comments(raw)
+    parsed = []
+    skipped = []
+    regs = parse_saveload_registrations(src)
+    for m in IMPORT_FN_RE.finditer(src):
+        cls = m.group(1)
+        open_brace = m.end() - 1
+        close_brace = find_balanced_close(src, open_brace)
+        if close_brace < 0:
+            skipped.append(
+                SkippedImport(cls, path.name, src.count("\n", 0, open_brace) + 1, "unbalanced braces")
+            )
+            continue
+        body = src[open_brace + 1 : close_brace]
+        line_no = src.count("\n", 0, open_brace) + 1
+        statements = split_statements(body)
+        calls = []
+        bad_reason = None
+        for stmt in statements:
+            sm = IMPORTFIELD_STMT_RE.match(stmt)
+            if sm:
+                calls.append(
+                    ImportCall(
+                        colname=sm.group("colname"),
+                        outer=sm.group("outer"),
+                        sub=sm.group("sub"),
+                    )
+                )
+                continue
+            # Anything else disqualifies the class.
+            preview = re.sub(r"\s+", " ", stmt)[:80]
+            bad_reason = f"non-ImportField statement: {preview!r}"
+            break
+        if bad_reason is not None:
+            skipped.append(SkippedImport(cls, path.name, line_no, bad_reason))
+            continue
+        if not calls:
+            skipped.append(SkippedImport(cls, path.name, line_no, "empty Import body"))
+            continue
+        parsed.append(ParsedImport(cls, calls, path.name, line_no))
+    return parsed, skipped, regs
+
+
+# ---------------------------------------------------------------------------
+# Type inference using header info + heuristics.
+# ---------------------------------------------------------------------------
+
+
+def name_fallback_type(name: str) -> int:
+    for rx, code in NAME_TYPE_FALLBACK:
+        if rx.match(name):
+            return code
+    return T_INT  # last resort — better than nothing
+
+
+def subfield_name_to_code(name: str) -> int:
+    for rx, code in SUBFIELD_NAME_HEURISTIC:
+        if rx.match(name):
+            return code
+    # Single-letter leaf names like x/y/z on vector types: assume float.
+    if len(name) == 1 and name in "xyzwrgbauv":
+        return T_FLOAT
+    if name in {"left", "top", "right", "bottom"}:
+        return T_INT
+    return T_INT
+
+
+def resolve_type_code(
+    class_name: str,
+    outer_member: str,
+    sub_member: str | None,
+    headers: list,
+) -> int:
+    """Look up the member declared in class_name's parsed header info."""
+    decl_type = None
+    for hi in headers:
+        if class_name in hi.classes:
+            members = hi.classes[class_name]
+            if outer_member in members:
+                decl_type = members[outer_member]
+                break
+    # Compute outer-level type code.
+    if sub_member is None:
+        if decl_type is not None:
+            code = map_type_to_code(decl_type)
+            if code is not None:
+                return code
+        return name_fallback_type(outer_member)
+    # Sub-field: code depends on the SUB member's type.
+    # We don't aggressively resolve the outer struct here; the Hungarian
+    # naming on the sub member is the strongest signal we have.
+    return subfield_name_to_code(sub_member)
+
+
+def resolve_outer_struct_type(
+    class_name: str, outer_member: str, headers: list
+) -> str | None:
+    """Return a string like 'CVec3' to be used inside offsetof(<struct>, sub).
+    Returns None if we can't tell, in which case we fall back to using the
+    outer member's containing class (which will fail to compile but flags it
+    clearly)."""
+    for hi in headers:
+        if class_name in hi.classes:
+            members = hi.classes[class_name]
+            if outer_member in members:
+                t = members[outer_member].strip()
+                # Strip const/pointer markers.
+                if t.startswith("const "):
+                    t = t[6:].strip()
+                t = t.rstrip("*&").strip()
+                # Take just the leading identifier (before any '<').
+                base = t.split("<", 1)[0].strip()
+                # Strip namespace prefix.
+                base = base.rsplit("::", 1)[-1]
+                if base:
+                    return base
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    if not DBFORMAT_DIR.is_dir():
+        print(f"DBFormat dir not found: {DBFORMAT_DIR}", file=sys.stderr)
+        return 1
+
+    cpp_files = sorted(DBFORMAT_DIR.glob("Data*.cpp"))
+    h_files = sorted(DBFORMAT_DIR.glob("Data*.h"))
+
+    # Parse all headers up front.
+    header_infos = [parse_header(h) for h in h_files]
+
+    # Build a map: class -> header basename, for include-list generation.
+    class_to_header = {}
+    for hi in header_infos:
+        class_to_header.update(hi.class_to_header)
+
+    all_parsed = []
+    all_skipped = []
+    all_regs = {}  # ClassName -> typeID (int)
+    for cpp in cpp_files:
+        parsed, skipped, regs = parse_cpp(cpp)
+        all_parsed.extend(parsed)
+        all_skipped.extend(skipped)
+        for cls, tid in regs.items():
+            all_regs.setdefault(cls, tid)
+
+    # Emit the header.
+    lines = []
+    lines.append("// AUTO-GENERATED by tools/gen_schemas.py - do not edit")
+    lines.append("#pragma once")
+    lines.append("")
+    lines.append("#include <cstddef>")
+    lines.append("")
+    # Compute required headers (those whose classes appear in parsed list).
+    needed_headers = set()
+    for p in all_parsed:
+        hdr = class_to_header.get(p.class_name)
+        if hdr:
+            needed_headers.add(hdr)
+    rel_prefix = "../../../upstream/Soft/Andy/Jan03/a5dll/DBFormat/"
+    for hdr in sorted(needed_headers):
+        lines.append(f'#include "{rel_prefix}{hdr}"')
+    lines.append("")
+    lines.append("namespace NDb {")
+    lines.append("")
+    lines.append("struct SColumnInfo {")
+    lines.append("    const char* name;")
+    lines.append("    int type;       // 0=int, 1=bool, 2=float, 3=string, 4=wstring, 5=ref(CPtr<T>)")
+    lines.append("    int offset;     // offsetof(class, outer_member)")
+    lines.append("    int subOffset;  // offsetof(struct, sub_member) for nested fields, else 0")
+    lines.append("};")
+    lines.append("")
+    lines.append("template<typename T> const SColumnInfo* GetSchemaFor();")
+    lines.append("")
+
+    total_cols = 0
+    for p in all_parsed:
+        cls = p.class_name
+        lines.append(
+            f"// {cls}  (from {p.cpp_file}:{p.line_no})"
+        )
+        lines.append(
+            f"template<> inline const SColumnInfo* GetSchemaFor<NDb::{cls}>() {{"
+        )
+        lines.append("    static const SColumnInfo cols[] = {")
+        # Compute column width for tidy formatting.
+        max_name_len = max((len(c.colname) for c in p.fields), default=0)
+        for call in p.fields:
+            tcode = resolve_type_code(cls, call.outer, call.sub, header_infos)
+            name_lit = f'"{call.colname}",'
+            name_field_width = max_name_len + 3  # quotes + trailing comma
+            name_lit_padded = name_lit.ljust(name_field_width)
+            offset_expr = f"offsetof(NDb::{cls}, {call.outer})"
+            if call.sub is None:
+                sub_expr = "0"
+            else:
+                outer_struct = resolve_outer_struct_type(cls, call.outer, header_infos)
+                if outer_struct is None:
+                    sub_expr = f"/* unknown outer type for {call.outer} */ 0"
+                else:
+                    sub_expr = f"offsetof({outer_struct}, {call.sub})"
+            lines.append(
+                f"        {{ {name_lit_padded} {tcode}, {offset_expr}, {sub_expr} }},  // {code_to_comment(tcode)}"
+            )
+            total_cols += 1
+        lines.append("        { nullptr, 0, 0, 0 }  // sentinel")
+        lines.append("    };")
+        lines.append("    return cols;")
+        lines.append("}")
+        lines.append("")
+
+    # --- Registry: SSchemaEntry table mapping typeID -> schema getter ---
+    registry_entries = []  # list of (cls, tid)
+    missing_typeid = []
+    for p in all_parsed:
+        tid = all_regs.get(p.class_name)
+        if tid is None:
+            missing_typeid.append(p.class_name)
+            continue
+        registry_entries.append((p.class_name, tid))
+    # Stable sort by typeID for determinism.
+    registry_entries.sort(key=lambda x: x[1])
+
+    lines.append("// ---------------------------------------------------------------------------")
+    lines.append("// Schema registry: typeID -> schema getter")
+    lines.append("// ---------------------------------------------------------------------------")
+    lines.append("")
+    lines.append("struct SSchemaEntry {")
+    lines.append("    int typeID;")
+    lines.append("    const SColumnInfo* (*getter)();")
+    lines.append("};")
+    lines.append("")
+    # Inline wrapper functions: one per class with a known typeID.
+    for cls, _tid in registry_entries:
+        lines.append(
+            f"inline const SColumnInfo* getSchema{cls}() {{ return GetSchemaFor<NDb::{cls}>(); }}"
+        )
+    lines.append("")
+    lines.append("inline const SSchemaEntry* GetAllSchemas(int* outCount) {")
+    lines.append("    static const SSchemaEntry entries[] = {")
+    for cls, tid in registry_entries:
+        lines.append(f"        {{ 0x{tid:08x}, &getSchema{cls} }},")
+    lines.append("    };")
+    lines.append("    *outCount = sizeof(entries) / sizeof(entries[0]);")
+    lines.append("    return entries;")
+    lines.append("}")
+    lines.append("")
+
+    lines.append("} // namespace NDb")
+    lines.append("")
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.write_text("\n".join(lines), encoding="utf-8")
+
+    # --- Report ---
+    print(f"Wrote: {OUTPUT_PATH}")
+    print(f"Classes parsed: {len(all_parsed)}")
+    print(f"Total columns:  {total_cols}")
+    print(f"Classes skipped: {len(all_skipped)}")
+    for s in all_skipped:
+        print(f"  - {s.class_name}  ({s.cpp_file}:{s.line_no})  {s.reason}")
+    print(f"REGISTER_SAVELOAD_CLASS entries found: {len(all_regs)}")
+    print(f"Registry entries emitted: {len(registry_entries)}")
+    if missing_typeid:
+        print(f"Parsed classes lacking a REGISTER_SAVELOAD_CLASS (skipped from registry): {len(missing_typeid)}")
+        for cls in missing_typeid:
+            print(f"  - {cls}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

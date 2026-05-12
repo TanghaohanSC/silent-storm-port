@@ -41,6 +41,12 @@ using namespace std;
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\Misc\BasicFactory.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\FileIO\BasicChunk1.h"
 #include "db_table_storage.h"
+// r28 attempted: include "db_record_schemas.h" for static field fill.
+// Build fails because DataXxx.h transitively depends on Misc/Geom.h etc
+// that aren't preprocessed in ado_stub.cpp's compile context (no StdAfx PCH).
+// Schema-based fill deferred to r29 where the generated header gets its
+// own compile unit with a proper header chain.
+// #include "db_record_schemas.h"
 #include "..\..\..\upstream\Soft\Andy\Jan03\a5dll\ADOImport\BasicDB.h"
 // silent-storm-port r21: r20's std::list path was a dead end; r21 finds via
 // Ghidra-RE of shipping CDBTableBase::op& (FUN_00449A10) that storage is on
@@ -321,13 +327,10 @@ static void PromoteRecordsFromStorage()
         }
     }
     if (dump) fclose(dump);
-    // r26: Phase 2 disabled — Import side effects (pTemplate->variants.push_back
-    // etc.) mutate global state in ways that break bgfx 2D view init.
-    // Sticking with r24's basic ID promote until static schema gen replaces Import.
     (void)nFieldsFilled;
-    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r25_promote.log", "w");
+    FILE* fp = NULL; fopen_s(&fp, "silent_storm_r28_promote.log", "w");
     if (fp) {
-        fprintf(fp, "r26: promoted %d records (IDs only, no field fill) %d/%d tables\n",
+        fprintf(fp, "r28-staging: promoted %d records (IDs only — schema fill compile deferred to r29) %d/%d tables\n",
                 nPromoted, nMatched, nTotalTables);
         fclose(fp);
     }
